@@ -1,0 +1,91 @@
+{
+  "name": "dsh-desktop",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness 桌面客户端 - 类 ChatGPT 体验",
+  "main": "main.js",
+  "author": {
+    "name": "DSH Community",
+    "email": "dsh@example.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/dsh-community/dsh-desktop#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dsh-community/dsh-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dsh-community/dsh-desktop/issues"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:win:portable": "electron-builder --win portable",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "pack": "electron-builder --dir",
+    "pack:win": "electron-packager . \"DeepSeek Harness\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "pack:win:dir": "electron-packager . \"DeepSeek Harness\" --platform=win32 --arch=x64 --out=dist --overwrite --asar"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "ai",
+    "desktop",
+    "chatgpt"
+  ],
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.dsh.desktop",
+    "productName": "DeepSeek Harness",
+    "copyright": "Copyright © 2026 DSH Community",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DeepSeek Harness"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/icon.png",
+      "assets/icon.ico"
+    ]
+  },
+  "allowScripts": {
+    "electron@35.7.5": true
+  }
+}

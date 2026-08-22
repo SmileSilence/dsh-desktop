@@ -1,0 +1,3 @@
+@echo off
+echo 以管理员身份启动 DSH Desktop...
+powershell -Command "Start-Process cmd -ArgumentList '/c cd /d \"%~dp0\" && npm start' -Verb RunAs"
