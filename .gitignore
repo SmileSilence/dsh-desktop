@@ -13,15 +13,6 @@ out/
 .dsw-*
 *.tgz
 
-# Build outputs
-dist/
-build/
-out/
-
-# Electron
-.dsw-*
-*.tgz
-
 # Logs
 logs/
 *.log
