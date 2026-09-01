@@ -16,7 +16,8 @@
 
 前往 [Releases](https://github.com/SmileSilence/dsh-desktop/releases) 下载最新版 Windows 安装包：
 
-- `DeepSeek Harness-<版本>-Setup.exe`（NSIS 安装包，双击安装，可自定义安装目录）
+- **v1.1.1 直链下载**：[DeepSeek.Harness-1.1.1-Setup.exe](https://github.com/SmileSilence/dsh-desktop/releases/download/v1.1.1/DeepSeek.Harness-1.1.1-Setup.exe)（NSIS 安装包，约 80.8 MB，双击安装，可自定义安装目录）
+- 更多历史版本见 [Releases](https://github.com/SmileSilence/dsh-desktop/releases)
 
 > 安装包内**不内置 DSH 后端**，目标电脑需已安装 DeepSeek Harness（dsh）环境，或已安装 Node.js（>= 22）可联网（应用会自动拉起后端）。
 
