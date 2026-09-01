@@ -1,0 +1,6 @@
+/* 主题变量（P1.6 / X6）。
+ * 只作用于窗口 chrome 与标题栏占位区，不覆盖 DSH 自身主题（dsh-client-ui-theme）。 */
+:root {
+  --dsh-desktop-bg: __BG__;
+  --dsh-desktop-fg: __FG__;
+}

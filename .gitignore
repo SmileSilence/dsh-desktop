@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 .pnp
 .pnp.js
 
@@ -8,6 +7,10 @@ package-lock.json
 dist/
 build/
 out/
+# NSIS 版本注入产物（build-installer.ps1 生成，勿入库）
+version.nsh
+# 内部备份（历史文件快照，不入库）
+backup-main/
 
 # Electron
 .dsw-*

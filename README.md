@@ -2,13 +2,23 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 
 **类 ChatGPT 桌面客户端 - AI 助手**
 
 </div>
+
+---
+
+## 📥 下载安装包
+
+前往 [Releases](https://github.com/SmileSilence/dsh-desktop/releases) 下载最新版 Windows 安装包：
+
+- `DeepSeek Harness-<版本>-Setup.exe`（NSIS 安装包，双击安装，可自定义安装目录）
+
+> 安装包内**不内置 DSH 后端**，目标电脑需已安装 DeepSeek Harness（dsh）环境，或已安装 Node.js（>= 22）可联网（应用会自动拉起后端）。
 
 ---
 
@@ -23,16 +33,18 @@
 | 🎨 **深色主题** | 优雅的深色界面设计 |
 | 🌐 **中文支持** | 完整的中文菜单和设置 |
 | ⚙️ **丰富设置** | 窗口、托盘、快捷键等可配置 |
-| 📦 **多平台打包** | 支持 Windows/macOS/Linux |
+| 🗂️ **单窗口多页签** | 顶部、左侧、右侧三种页签布局，单任务栏与单托盘 |
+| 🔌 **插件直通** | 直接使用 `web:3080`，Web 安装的插件无需复制即可使用 |
+| ⚙️ **内置页签** | 设置、关于集成到主窗口页签，语言通过下拉菜单选择 |
 
 ---
 
 ## 📋 系统要求
 
-- **Windows**：Windows 10 或更高版本
-- **Node.js**：>= 18.0.0
+- **Windows**：Windows 10 或 Windows 11（不再支持 macOS/Linux）
+- **Node.js**：>= 22.0.0
 - **npm**：>= 9.0.0
-- **DSH Web**：需要运行中（默认端口 3080）
+- **DSH CLI**：使用 `web` profile；若 3080 已运行则直接复用
 
 ---
 
@@ -42,7 +54,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone <repository-url>
+git clone https://github.com/SmileSilence/dsh-desktop.git
 cd dsh-desktop
 
 # 2. 安装依赖
@@ -55,40 +67,46 @@ npm start
 npm run dev
 ```
 
-### 方式2：打包成安装包
+### 方式2：生成待确认 Preview
 
 ```bash
-# Windows 安装包
-npm run build:win
-
-# Windows 便携版
-npm run build:win:portable
-
-# macOS
-npm run build:mac
-
-# Linux
-npm run build:linux
+npm run build
 ```
 
 打包后的文件位于 `dist/` 目录。
+
+### 方式3：确认后生成安装包
+
+先按 [用户指南](docs/user-guide.md) 验证 Preview；明确确认后才可执行带 `-FromValidatedPreview` 的安装包脚本。
+
+> ⚠️ **重要**：本客户端直接使用 `web` profile（`http://127.0.0.1:3080`），Web 插件会直接共享，
+> **不内置 DSH 后端**。目标电脑需要满足以下任一条件才能正常使用：
+>
+> 1. **已安装 DeepSeek Harness（dsh）环境** —— 直接使用，应用会自动拉起本地后端；或
+> 2. **已安装 Node.js（>= 22）且可联网** —— 应用会通过 `npx @deepseek-ai/dsh` 自动拉取后端；或
+> 浏览器使用的 `web:3080` 不会被桌面端复用、修改或停止。
+>
+> 不满足以上条件时，应用会给出明确的错误提示（不会白屏卡死）。
+
+**首次启动引导**：应用会检测模型 API Key。若 `~/.dsh/.credentials.yaml` 或环境变量
+`DEEPSEEK_API_KEY` 中未配置密钥，会弹出引导窗口，可填写 DeepSeek API Key 或选择稍后
+在 DSH 界面「模型设置」中配置。
 
 ---
 
 ## ⌨️ 快捷键
 
-| 快捷键 | 功能 |
+> 全局快捷键均可在 设置 → 快捷键设置 中修改，或**双击左侧标题**设为「不设置」。
+
+| 快捷键（默认） | 功能 |
 |--------|------|
 | `Ctrl+Shift+D` | 全局呼出/隐藏窗口 |
-| `Ctrl+N` | 新建对话 |
 | `Ctrl+,` | 打开设置 |
-| `Ctrl+Q` | 退出应用 |
-| `F11` | 全屏切换 |
-| `F12` | 打开开发者工具 |
-| `Ctrl+R` | 重新加载页面 |
-| `Ctrl+=` | 放大 |
-| `Ctrl+-` | 缩小 |
-| `Ctrl+0` | 重置缩放 |
+| `F1` | 打开关于 |
+| `Ctrl+Shift+R` | 重启后端 |
+| `Ctrl+T` | 新建页签 |
+| `F12` / `Ctrl+Shift+I` | 打开开发者工具 |
+| `Ctrl+R` | 重新加载当前页签 |
 
 ---
 
@@ -100,35 +118,24 @@ npm run build:linux
 
 ```json
 {
-  "autoLaunch": false,
-  "closeToTray": true,
-  "showInTaskbar": true,
-  "topMost": false,
-  "darkMode": true,
+  "window": { "width": 1200, "height": 800, "tabPosition": "top" },
+  "theme": { "mode": "system" },
+  "tray": { "autoLaunch": false, "closeToTray": true, "showInTaskbar": true, "topMost": false },
   "hotkey": "CommandOrControl+Shift+D",
-  "language": "zh-CN"
+  "hotkeySettings": "CommandOrControl+,",
+  "hotkeyAbout": "F1",
+  "hotkeyRestartBackend": "CommandOrControl+Shift+R",
+  "hotkeyNewTab": "CommandOrControl+T",
+  "language": "zh-CN",
+  "dsh": { "path": "", "port": 3080 }
 }
 ```
 
-### 配置项说明
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `autoLaunch` | boolean | `false` | 开机自启动 |
-| `closeToTray` | boolean | `true` | 关闭窗口时隐藏到托盘 |
-| `showInTaskbar` | boolean | `true` | 在任务栏显示图标 |
-| `topMost` | boolean | `false` | 窗口置顶 |
-| `darkMode` | boolean | `true` | 深色模式 |
-| `hotkey` | string | `CommandOrControl+Shift+D` | 全局快捷键 |
-| `language` | string | `zh-CN` | 语言设置 |
+> 热键留空字符串 = 禁用该快捷键；`dsh.path` 指向 DSH 仓库路径，留空自动探测。
 
 ### 修改 DSH 服务地址
 
-编辑 `main.js`：
-
-```javascript
-const DSH_URL = 'http://127.0.0.1:3080';
-```
+在 设置 → DSH 路径设置 中填写 `dsh.path`，或编辑配置文件中的 `dsh.path` 字段。
 
 ---
 
@@ -136,18 +143,15 @@ const DSH_URL = 'http://127.0.0.1:3080';
 
 ```
 dsh-desktop/
-├── main.js              # Electron 主进程
+├── main.js              # Electron 主进程入口
+├── main/                # 主进程模块（窗口/页签/托盘/桥接/热键等）
 ├── preload.js           # 预加载脚本
 ├── package.json         # 项目配置
 ├── README.md            # 项目文档
 ├── LICENSE              # 开源协议
-├── assets/              # 资源文件
-│   ├── icon.ico         # Windows 图标
-│   ├── icon.icns        # macOS 图标
-│   └── icon.png         # 通用图标
+├── assets/              # 资源文件（图标等）
 └── dist/                # 打包输出
-    ├── DeepSeek Harness-1.0.0-Setup.exe
-    └── DeepSeek Harness-1.0.0-Portable.exe
+    └── DeepSeek Harness-1.1.1-Setup.exe
 ```
 
 ---
@@ -332,6 +336,6 @@ npm run build:win
 
 **享受类 ChatGPT 的桌面体验！** 🚀
 
-Made with ❤️ by DSH Community
+Made with ❤️ by SmileSilence
 
 </div>

@@ -1,29 +1,28 @@
 {
   "name": "dsh-desktop",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "DeepSeek Harness 桌面客户端 - 类 ChatGPT 体验",
   "main": "main.js",
   "author": {
-    "name": "DSH Community",
-    "email": "dsh@example.com"
+    "name": "SmileSilence",
+    "email": "1916360717@qq.com"
   },
   "license": "MIT",
-  "homepage": "https://github.com/dsh-community/dsh-desktop#readme",
+  "homepage": "https://github.com/SmileSilence/dsh-desktop#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dsh-community/dsh-desktop.git"
+    "url": "https://github.com/SmileSilence/dsh-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/dsh-community/dsh-desktop/issues"
+    "url": "https://github.com/SmileSilence/dsh-desktop/issues"
   },
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "electron-builder",
+    "test": "node --test \"tests/*.spec.mjs\"",
+    "icons": "electron scripts/make-icons.mjs && node scripts/pack-ico.mjs",
+    "build": "powershell -ExecutionPolicy Bypass -File scripts/build-preview.ps1",
     "build:win": "electron-builder --win",
-    "build:win:portable": "electron-builder --win portable",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux",
     "pack": "electron-builder --dir",
     "pack:win": "electron-packager . \"DeepSeek Harness\" --platform=win32 --arch=x64 --out=dist --overwrite",
     "pack:win:dir": "electron-packager . \"DeepSeek Harness\" --platform=win32 --arch=x64 --out=dist --overwrite --asar"
@@ -45,13 +44,12 @@
     "appId": "com.dsh.desktop",
     "productName": "DeepSeek Harness",
     "copyright": "Copyright © 2026 DSH Community",
+    "electronDist": "node_modules/electron/dist",
     "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "assets/icon.ico",
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "target": ["nsis"],
+      "icon": "assets/app.ico",
+      "artifactName": "${productName}-${version}-Setup.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
@@ -61,28 +59,12 @@
       "createStartMenuShortcut": true,
       "shortcutName": "DeepSeek Harness"
     },
-    "portable": {
-      "artifactName": "${productName}-Portable.${ext}"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "assets/icon.icns"
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "icon": "assets/icon.png"
-    },
     "files": [
       "main.js",
+      "main/**/*",
       "preload.js",
       "assets/icon.png",
-      "assets/icon.ico"
+      "assets/icon-256.png"
     ]
   },
   "allowScripts": {
