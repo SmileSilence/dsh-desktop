@@ -7,7 +7,7 @@
  *
  * P0 验收：npm start 行为不变；日志落盘；内嵌窗无 nodeIntegration；node --test 可跑。
  */
-const { app, BrowserWindow, WebContentsView, Menu, globalShortcut, dialog, ipcMain, nativeTheme, Notification } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, globalShortcut, dialog, ipcMain, nativeTheme, Notification, shell } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -136,10 +136,17 @@ const LANG = {
 
   // 关于
   aboutTitle: '关于 DSH Desktop',
-  aboutVersion: '版本：1.1.1',
+  aboutVersion: '版本：1.2.0',
   aboutDescription: '类 ChatGPT 桌面客户端 - AI 助手',
-  aboutAuthor: '作者：DSH Community',
+  aboutAuthor: '作者：SmileSilence',
   aboutLicense: '许可证：MIT',
+  // 关于 - 使用说明
+  aboutUsageTitle: '使用说明',
+  aboutUsageLine1: '本客户端直接使用 DeepSeek Harness 的 Web 服务（web profile，http://127.0.0.1:3080），启动后自动连接或拉起后端。',
+  aboutUsageLine2: '如果 3080 端口已有 DSH Web 服务在运行，桌面端会直接复用，无需额外操作。',
+  aboutUsageLine3: '如需手动启动 DSH 后端：npx @deepseek-ai/dsh web --no-open',
+  aboutDshGitHub: 'DSH GitHub 仓库',
+  aboutDshDocs: 'DSH 官方文档',
 
   // 窗口菜单
   menuMinimize: '最小化',
@@ -227,10 +234,16 @@ function loadLanguage(lang) {
       msgRestart: 'Restart',
       msgLater: 'Later',
       aboutTitle: 'About DSH Desktop',
-      aboutVersion: 'Version: 1.1.1',
+      aboutVersion: 'Version: 1.2.0',
       aboutDescription: 'ChatGPT-like Desktop Client - AI Assistant',
-      aboutAuthor: 'Author: DSH Community',
+      aboutAuthor: 'Author: SmileSilence',
       aboutLicense: 'License: MIT',
+      aboutUsageTitle: 'Usage Guide',
+      aboutUsageLine1: 'This client directly uses the DSH Web service (web profile, http://127.0.0.1:3080). It automatically connects or starts the backend on launch.',
+      aboutUsageLine2: 'If a DSH Web service is already running on port 3080, the desktop client will reuse it directly.',
+      aboutUsageLine3: 'To manually start the DSH backend: npx @deepseek-ai/dsh web --no-open',
+      aboutDshGitHub: 'DSH GitHub Repository',
+      aboutDshDocs: 'DSH Documentation',
       menuMinimize: 'Minimize',
       menuClose: 'Close Window',
       menuHotkey: 'Global Hotkey',
@@ -872,6 +885,13 @@ ipcMain.on('hotkey-capture-start', (event) => {
 ipcMain.on('hotkey-capture-end', (event) => {
   if (!isInternalPageSender(event)) return;
   registerHotkeys();
+});
+
+// 关于页外部链接（DSH 文档 / GitHub）
+ipcMain.on('open-external', (event, url) => {
+  if (!isInternalPageSender(event)) return;
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+  shell.openExternal(url);
 });
 
 ipcMain.handle('internal-dsh-check-update', async (event) => {

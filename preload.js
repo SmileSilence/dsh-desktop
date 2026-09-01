@@ -38,5 +38,6 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   updateDsh: (confirm) => ipcRenderer.invoke('internal-dsh-update', confirm === true),
   confirm: (message) => ipcRenderer.invoke('internal-confirm', message),
   hotkeyCaptureStart: () => ipcRenderer.send('hotkey-capture-start'),
-  hotkeyCaptureEnd: () => ipcRenderer.send('hotkey-capture-end')
+  hotkeyCaptureEnd: () => ipcRenderer.send('hotkey-capture-end'),
+  openExternal: (url) => ipcRenderer.send('open-external', url)
 });

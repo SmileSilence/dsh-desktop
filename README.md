@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.1.1-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 
@@ -16,7 +16,8 @@
 
 前往 [Releases](https://github.com/SmileSilence/dsh-desktop/releases) 下载最新版 Windows 安装包：
 
-- **v1.1.1 直链下载**：[DeepSeek.Harness-1.1.1-Setup.exe](https://github.com/SmileSilence/dsh-desktop/releases/download/v1.1.1/DeepSeek.Harness-1.1.1-Setup.exe)（NSIS 安装包，约 80.8 MB，双击安装，可自定义安装目录）
+- **v1.2.0 直链下载**：[DeepSeek.Harness-1.2.0-Setup.exe](https://github.com/SmileSilence/dsh-desktop/releases/download/v1.2.0/DeepSeek.Harness-1.2.0-Setup.exe)（NSIS 安装包，约 88.3 MB，lzma 压缩；安装包集成 DSH 后端安装选项：可选全局 npm 安装或源码克隆）
+- v1.1.1：[DeepSeek.Harness-1.1.1-Setup.exe](https://github.com/SmileSilence/dsh-desktop/releases/download/v1.1.1/DeepSeek.Harness-1.1.1-Setup.exe)（约 80.8 MB）
 - 更多历史版本见 [Releases](https://github.com/SmileSilence/dsh-desktop/releases)
 
 > 安装包内**不内置 DSH 后端**，目标电脑需已安装 DeepSeek Harness（dsh）环境，或已安装 Node.js（>= 22）可联网（应用会自动拉起后端）。
@@ -152,7 +153,7 @@ dsh-desktop/
 ├── LICENSE              # 开源协议
 ├── assets/              # 资源文件（图标等）
 └── dist/                # 打包输出
-    └── DeepSeek Harness-1.1.1-Setup.exe
+    └── DeepSeek Harness-1.2.0-Setup.exe
 ```
 
 ---
@@ -295,7 +296,14 @@ npm run build:win
 
 ## 📝 更新日志
 
-### v1.0.0 (2026-08-21)
+### v1.2.0 (2026-09-02)
+
+- ✨ 安装包新增 **DSH 后端安装选项**：全局 npm 安装 `@deepseek-ai/dsh` 或克隆源码到 `%USERPROFILE%\deepseek-harness` 并安装依赖（可选跳过，由用户自行处理）
+- ✨ 关于页新增 **使用说明**：Web 3080 的使用方法、DSH GitHub 仓库链接、DSH 官方文档链接
+- ✨ 卸载器新增 **完整清理选项**（默认全部勾选）：卸载 DSH 全局安装 / 删除 DSH 源码目录（仅限安装包创建的） / 删除应用数据与日志（`%APPDATA%\dsh-desktop`） / 删除 DSH 数据与会话（`~/.dsh`，含 API 凭据）
+- ⚡ 安装包改用 **lzma 压缩**（约 88.3 MB，较 v1.1.1 略大，但安装体积更小）
+
+### v1.1.1 (2026-08-23)
 
 - ✨ 初始版本发布
 - ✨ 独立窗口支持

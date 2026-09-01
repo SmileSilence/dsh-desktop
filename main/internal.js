@@ -10,6 +10,16 @@ function el(tag, text, className) {
   return node;
 }
 
+function linkEl(text, href) {
+  const a = document.createElement('a');
+  a.textContent = text;
+  a.href = href;
+  a.className = 'link';
+  a.target = '_blank';
+  a.onclick = (e) => { e.preventDefault(); api.openExternal(href); };
+  return a;
+}
+
 function settingRow(label, control) {
   const row = el('div', null, 'setting-item');
   row.append(el('span', label, 'setting-label'), control);
@@ -178,6 +188,16 @@ function renderAbout(data) {
   const lang = data.language;
   const card = el('section', null, 'about-card');
   card.append(el('h1', lang.appName), el('p', `${lang.aboutVersion} (${data.appVersion})`, 'brand'), el('p', lang.aboutDescription), el('p', `${lang.aboutAuthor}\n${lang.aboutLicense}`));
+
+  const usageCard = el('section', null, 'section');
+  usageCard.append(el('div', lang.aboutUsageTitle, 'section-title'));
+  usageCard.append(el('p', lang.aboutUsageLine1, 'usage-text'), el('p', lang.aboutUsageLine2, 'usage-text'), el('p', lang.aboutUsageLine3, 'usage-text'));
+  const linkRow = el('div', null, 'usage-links');
+  linkRow.append(linkEl(lang.aboutDshGitHub, 'https://github.com/deepseek-ai/deepseek-harness'));
+  linkRow.append(el('span', ' · '));
+  linkRow.append(linkEl(lang.aboutDshDocs, 'https://github.com/deepseek-ai/deepseek-harness#readme'));
+  usageCard.append(linkRow);
+
   const updateCard = el('section', null, 'section');
   updateCard.append(el('div', 'DSH 更新', 'section-title'));
   const versionStatus = el('div', '点击“检查更新”获取当前版本和最新版本。', 'update-status');
@@ -216,7 +236,7 @@ function renderAbout(data) {
   };
   actions.append(checkButton, updateButton);
   updateCard.append(versionStatus, actions);
-  appRoot.append(card, updateCard);
+  appRoot.append(card, usageCard, updateCard);
 }
 
 api.getInternalPageData().then((data) => {
