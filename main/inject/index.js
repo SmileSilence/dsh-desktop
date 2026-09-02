@@ -27,16 +27,49 @@ function isSameOrigin(pageUrl, dshUrl) {
   }
 }
 
+/** 生成侧栏品牌标题注入脚本；MutationObserver 负责处理 React 后续重绘。 */
+function brandTitleScriptFor(value) {
+  const title = typeof value === 'string' ? value.trim().slice(0, 40) : '';
+  const serializedTitle = JSON.stringify(title).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `(() => {
+    const observerKey = '__DSH_DESKTOP_BRAND_OBSERVER__';
+    window[observerKey]?.disconnect?.();
+    const title = ${serializedTitle};
+    const defaults = new Set(['DSH 本地构建', 'DSH Local Build']);
+    const apply = () => {
+      for (const node of document.querySelectorAll('span')) {
+        const original = node.dataset.dshDesktopBrandOriginal;
+        if (original !== undefined) {
+          if (node.textContent !== (title || original)) node.textContent = title || original;
+          if (!title) delete node.dataset.dshDesktopBrandOriginal;
+        } else if (title && defaults.has(node.textContent.trim())) {
+          node.dataset.dshDesktopBrandOriginal = node.textContent;
+          node.textContent = title;
+        }
+      }
+    };
+    apply();
+    if (title) {
+      const observer = new MutationObserver(apply);
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      window[observerKey] = observer;
+    } else {
+      delete window[observerKey];
+    }
+  })()`;
+}
+
 /**
  * @param {{
  *   getDshUrl:()=>string,
  *   getThemeMode:()=>'dark'|'light',
  *   getBridgeInfo?:()=>{bridgeBaseUrl:string, token:string}|null,
+ *   getBrandTitle?:()=>string,
  *   logger?:{log?:Function}
  * }} deps
  */
 function createInjector(deps) {
-  const { getDshUrl, getThemeMode, getBridgeInfo, logger = {} } = deps;
+  const { getDshUrl, getThemeMode, getBridgeInfo, getBrandTitle, logger = {} } = deps;
   const cssCache = {};
 
   function readCss(name) {
@@ -77,6 +110,7 @@ function createInjector(deps) {
     if (bridgeScript) {
       win.webContents.executeJavaScript(bridgeScript).catch(() => {});
     }
+    win.webContents.executeJavaScript(brandTitleScriptFor(getBrandTitle?.() || '')).catch(() => {});
   }
 
   /** 挂接到窗口生命周期（did-finish-load / did-navigate） */
@@ -97,4 +131,4 @@ function createInjector(deps) {
   return { attach, attachContent, applyInjections, isSameOrigin };
 }
 
-module.exports = { createInjector, isSameOrigin, THEME_COLORS };
+module.exports = { createInjector, isSameOrigin, brandTitleScriptFor, THEME_COLORS };

@@ -64,6 +64,47 @@ test('checkForUpdate: 无 compare 时兜底比较', async () => {
   assert.equal(r.hasUpdate, true);
 });
 
+test('checkForUpdate: 手动强制检查绕过节流', async () => {
+  let fetched = false;
+  const r = await checkForUpdate({
+    getCurrentVersion: () => '1.0.0',
+    getRepository: () => ({ owner: 'x', repo: 'y' }),
+    getLastChecked: () => Date.now(),
+    setLastChecked: () => {},
+    compare: compareSemver,
+    force: true,
+    fetch: async () => { fetched = true; return { version: 'v1.1.0', url: 'https://github.com/x/y/releases/tag/v1.1.0' }; }
+  });
+  assert.equal(fetched, true);
+  assert.equal(r.hasUpdate, true);
+});
+
+test('checkForUpdate: GitHub 失败不写成功检查时间', async () => {
+  let saved = false;
+  const r = await checkForUpdate({
+    getCurrentVersion: () => '1.0.0',
+    getRepository: () => ({ owner: 'x', repo: 'y' }),
+    getLastChecked: () => null,
+    setLastChecked: () => { saved = true; },
+    compare: compareSemver,
+    fetch: async () => ({ version: null, url: null, error: 'HTTP 403', errorCode: 'RATE_LIMITED' })
+  });
+  assert.equal(saved, false);
+  assert.equal(r.errorCode, 'RATE_LIMITED');
+  assert.equal(r.hasUpdate, false);
+});
+
+test('checkForUpdate: 无正式 Release 与非法版本分别报告原因', async () => {
+  const base = {
+    getCurrentVersion: () => '1.0.0', getRepository: () => ({ owner: 'x', repo: 'y' }),
+    getLastChecked: () => null, setLastChecked: () => {}, compare: compareSemver
+  };
+  const none = await checkForUpdate({ ...base, fetch: async () => ({ version: null, url: null, error: 'HTTP 404', errorCode: 'NO_RELEASE' }) });
+  assert.equal(none.errorCode, 'NO_RELEASE');
+  const invalid = await checkForUpdate({ ...base, fetch: async () => ({ version: 'latest', url: 'https://github.com/x/y/releases/latest' }) });
+  assert.equal(invalid.errorCode, 'INVALID_VERSION');
+});
+
 // ============ dsh-update（P3.4 / G1） ============
 test('sourceKind 映射', () => {
   assert.equal(sourceKind({ source: 'config-path' }), 'local-repo');

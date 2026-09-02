@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { windowConfigFor, chromeColorsFor, restoreWindowBounds } = require('../main/window.js');
-const { isSameOrigin } = require('../main/inject/index.js');
+const { isSameOrigin, brandTitleScriptFor } = require('../main/inject/index.js');
 
 // ============ windowConfigFor（§15.3 WCO 分平台） ============
 test('win32 → 原生标题栏（空对象），无 WCO overlay', () => {
@@ -67,4 +67,13 @@ test('isSameOrigin 同源通过', () => {
 test('isSameOrigin 异源/非法拒绝', () => {
   assert.equal(isSameOrigin('https://evil.com/', 'http://127.0.0.1:3080'), false);
   assert.equal(isSameOrigin('not-a-url', 'http://127.0.0.1:3080'), false);
+});
+
+test('侧栏品牌脚本安全序列化设置值并支持恢复默认', () => {
+  const custom = brandTitleScriptFor('我的 DSH');
+  assert.match(custom, /我的 DSH/);
+  assert.match(custom, /MutationObserver/);
+  const escaped = brandTitleScriptFor('</script><script>alert(1)</script>');
+  assert.doesNotMatch(escaped, /<\/script>/);
+  assert.match(brandTitleScriptFor(''), /delete window\[observerKey\]/);
 });

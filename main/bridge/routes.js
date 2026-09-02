@@ -7,7 +7,7 @@
  */
 
 // PATCH 白名单（§15.1）：window/theme/tray/hotkey/dsh/language；bridge/updater 不可由用户写
-const PATCH_WHITELIST = ['window', 'theme', 'tray', 'hotkey', 'dsh', 'language'];
+const PATCH_WHITELIST = ['window', 'theme', 'appearance', 'tray', 'hotkey', 'dsh', 'language'];
 
 const WINDOW_ACTIONS = new Set(['minimize', 'maximize', 'unmaximize', 'close', 'toggle', 'show']);
 

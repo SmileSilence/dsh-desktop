@@ -11,6 +11,7 @@ const path = require('path');
 const DEFAULTS = {
   window: { x: null, y: null, width: 1200, height: 800, maximized: false, tabPosition: 'top' },
   theme: { mode: 'system' }, // system | dark | light（B1）
+  appearance: { brandTitle: '' }, // DSH Web 侧栏品牌文字；空值保留上游默认标题
   tray: { autoLaunch: false, closeToTray: true, showInTaskbar: true, topMost: false },
   hotkey: 'CommandOrControl+Shift+D', // 切换窗口（显示/隐藏）
   hotkeySettings: 'CommandOrControl+,', // 打开设置
@@ -150,6 +151,12 @@ function validateConfig(cfg) {
 
   // theme
   check('theme.mode', THEME_MODES.includes(cfg.theme?.mode), `theme.mode 必须是 ${THEME_MODES.join('/')}`);
+
+  // appearance
+  const brandTitle = cfg.appearance?.brandTitle;
+  check('appearance.brandTitle', typeof brandTitle === 'string'
+    && brandTitle.length <= 40 && !/[\u0000-\u001f\u007f]/.test(brandTitle),
+  'appearance.brandTitle 必须是不超过 40 个字符且不含控制字符的字符串');
 
   // tray
   const t = cfg.tray || {};

@@ -28,10 +28,11 @@ test('页签名称规范化并限制 40 字符', () => {
 
 test('内部页签按 key 复用且可静默刷新', () => {
   class MockWebContents {
-    constructor() { this.urls = []; }
+    constructor() { this.urls = []; this.reloads = 0; }
     on() {}
     setWindowOpenHandler() {}
     loadURL(url) { this.urls.push(url); }
+    reload() { this.reloads += 1; }
     close() {}
     isDestroyed() { return false; }
   }
@@ -50,9 +51,10 @@ test('内部页签按 key 复用且可静默刷新', () => {
     getContentBounds: () => ({ width: 1200, height: 800 }),
     on: () => undefined
   };
+  let injectionRefreshes = 0;
   const manager = createTabManager({
     window, WebContentsView: MockView, getUrl: () => 'http://127.0.0.1:3080',
-    getPosition: () => 'top', injector: { attachContent: () => undefined }, preload: 'preload.js'
+    getPosition: () => 'top', injector: { attachContent: () => undefined, applyInjections: () => { injectionRefreshes += 1; } }, preload: 'preload.js'
   });
   const first = manager.openInternal('settings', '设置', 'data:text/html,one');
   const second = manager.openInternal('settings', '设置', 'data:text/html,two', false);
@@ -60,6 +62,10 @@ test('内部页签按 key 复用且可静默刷新', () => {
   assert.equal(manager.state().tabs.length, 1);
   assert.equal(manager.has('settings'), true);
   assert.equal(children.length, 1);
+  manager.reloadAll();
+  assert.equal(children[0].webContents.reloads, 1);
+  manager.refreshInjections();
+  assert.equal(injectionRefreshes, 1);
 });
 
 test('关闭非活动页签后重排内容区（页签栏隐藏时内容占满）', () => {

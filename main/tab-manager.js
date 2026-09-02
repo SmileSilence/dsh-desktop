@@ -119,6 +119,20 @@ function createTabManager(deps) {
     tabs.find((tab) => tab.id === activeId)?.view.webContents.reload();
   }
 
+  /** 重新加载所有页签（登录认证成功或后端重启后调用，让页面带上新会话）。 */
+  function reloadAll() {
+    for (const tab of tabs) {
+      if (tab.view.webContents && !tab.view.webContents.isDestroyed()) {
+        try { tab.view.webContents.reload(); } catch { /* 忽略已销毁的页签 */ }
+      }
+    }
+  }
+
+  /** 对所有 DSH 内容页重新应用桌面注入；同源检查会自动忽略内置页面。 */
+  function refreshInjections() {
+    for (const tab of tabs) injector.applyInjections({ webContents: tab.view.webContents });
+  }
+
   function rename(id, value) {
     if (tabs.length <= 1) return false;
     const tab = tabs.find((item) => item.id === id);
@@ -147,7 +161,7 @@ function createTabManager(deps) {
   window.on('resize', layout);
   window.on('show', layout);
   window.on('ready-to-show', layout);
-  return { add, openInternal, has: (key) => tabs.some((tab) => tab.key === key), activate, close, rename, layout, state, publish, reloadActive, openDevTools, destroy };
+  return { add, openInternal, has: (key) => tabs.some((tab) => tab.key === key), activate, close, rename, layout, state, publish, reloadActive, reloadAll, refreshInjections, openDevTools, destroy };
 }
 
 module.exports = { TITLEBAR_HEIGHT, TABBAR_SIZE, SIDE_TABBAR_SIZE, contentBounds, normalizeTabTitle, createTabManager };

@@ -149,6 +149,12 @@ function renderSettings(data) {
     tabPosSelect.append(option);
   });
   appearance.append(settingRow(lang.tabPositionLabel, tabPosSelect));
+  const brandTitleInput = el('input', null, 'text-input');
+  brandTitleInput.id = 'brandTitle';
+  brandTitleInput.value = cfg.appearance?.brandTitle || '';
+  brandTitleInput.placeholder = lang.brandTitlePlaceholder;
+  brandTitleInput.maxLength = 40;
+  appearance.append(settingRow(lang.brandTitleLabel, brandTitleInput));
 
   const language = section(lang.settingsLanguage);
   const select = el('select', null, 'select-input'); select.id = 'language';
@@ -175,7 +181,7 @@ function renderSettings(data) {
   const save = el('button', lang.btnApply, 'button'); save.type = 'button';
   const saved = el('span', '', 'saved'); saved.id = 'saveState';
   save.onclick = () => {
-    api.saveSettings({tray:{autoLaunch:document.getElementById('autoLaunch').checked,closeToTray:document.getElementById('closeToTray').checked,topMost:document.getElementById('topMost').checked},window:{tabPosition:tabPosSelect.value},hotkey:document.getElementById('hotkey').value,hotkeySettings:document.getElementById('hotkeySettings').value,hotkeyAbout:document.getElementById('hotkeyAbout').value,hotkeyRestartBackend:document.getElementById('hotkeyRestartBackend').value,hotkeyNewTab:document.getElementById('hotkeyNewTab').value,language:select.value,dsh:{path:pathInput.value}});
+    api.saveSettings({tray:{autoLaunch:document.getElementById('autoLaunch').checked,closeToTray:document.getElementById('closeToTray').checked,topMost:document.getElementById('topMost').checked},window:{tabPosition:tabPosSelect.value},appearance:{brandTitle:brandTitleInput.value.trim()},hotkey:document.getElementById('hotkey').value,hotkeySettings:document.getElementById('hotkeySettings').value,hotkeyAbout:document.getElementById('hotkeyAbout').value,hotkeyRestartBackend:document.getElementById('hotkeyRestartBackend').value,hotkeyNewTab:document.getElementById('hotkeyNewTab').value,language:select.value,dsh:{path:pathInput.value}});
     saved.textContent = '已保存';
   };
   actions.append(refresh, save, saved);
@@ -198,16 +204,49 @@ function renderAbout(data) {
   linkRow.append(linkEl(lang.aboutDshDocs, 'https://github.com/deepseek-ai/deepseek-harness#readme'));
   usageCard.append(linkRow);
 
+  const appUpdateCard = el('section', null, 'section');
+  appUpdateCard.append(el('div', lang.appUpdateTitle, 'section-title'));
+  const appVersionStatus = el('div', lang.appUpdatePrompt, 'update-status');
+  appVersionStatus.id = 'appUpdateStatus';
+  const appUpdateActions = el('div', null, 'update-actions');
+  const appCheckButton = el('button', lang.appUpdateCheck, 'button');
+  appCheckButton.id = 'appUpdateCheck';
+  const appDownloadButton = el('button', lang.appUpdateOpenDownload, 'button secondary');
+  appDownloadButton.id = 'appUpdateDownload';
+  appDownloadButton.disabled = true;
+  let appReleaseUrl = null;
+  appCheckButton.onclick = async () => {
+    appCheckButton.disabled = true;
+    appDownloadButton.disabled = true;
+    appVersionStatus.textContent = lang.appUpdateChecking;
+    try {
+      const result = await api.checkAppUpdate();
+      const view = window.dshUpdateView.formatAppUpdate(result, lang);
+      appVersionStatus.textContent = view.text;
+      appReleaseUrl = view.canOpen ? result.url : null;
+      appDownloadButton.disabled = !view.canOpen;
+    } catch (error) {
+      appVersionStatus.textContent = `${lang.appUpdateFailed}: ${error.message}`;
+    } finally {
+      appCheckButton.disabled = false;
+    }
+  };
+  appDownloadButton.onclick = () => {
+    if (appReleaseUrl) api.openExternal(appReleaseUrl);
+  };
+  appUpdateActions.append(appCheckButton, appDownloadButton);
+  appUpdateCard.append(appVersionStatus, appUpdateActions);
+
   const updateCard = el('section', null, 'section');
-  updateCard.append(el('div', 'DSH 更新', 'section-title'));
-  const versionStatus = el('div', '点击“检查更新”获取当前版本和最新版本。', 'update-status');
+  updateCard.append(el('div', lang.dshUpdateTitle, 'section-title'));
+  const versionStatus = el('div', lang.dshUpdatePrompt, 'update-status');
   const actions = el('div', null, 'update-actions');
-  const checkButton = el('button', '检查 DSH 更新', 'button');
-  const updateButton = el('button', '更新 DSH', 'button secondary');
+  const checkButton = el('button', lang.dshUpdateCheck, 'button');
+  const updateButton = el('button', lang.dshUpdateAction, 'button secondary');
   updateButton.disabled = true;
   const setBusy = (busy) => { checkButton.disabled = busy; updateButton.disabled = busy; };
   checkButton.onclick = async () => {
-    setBusy(true); versionStatus.textContent = '正在检查 DSH 更新…';
+    setBusy(true); versionStatus.textContent = lang.dshUpdateChecking;
     try {
       const result = await api.checkDshUpdate();
       const current = result.currentVersion || '未知';
@@ -236,7 +275,7 @@ function renderAbout(data) {
   };
   actions.append(checkButton, updateButton);
   updateCard.append(versionStatus, actions);
-  appRoot.append(card, usageCard, updateCard);
+  appRoot.append(card, usageCard, appUpdateCard, updateCard);
 }
 
 api.getInternalPageData().then((data) => {

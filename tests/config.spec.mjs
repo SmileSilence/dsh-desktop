@@ -9,6 +9,7 @@ test('DEFAULTS 形状符合 §15.5 schema', () => {
   assert.equal(DEFAULTS.window.width, 1200);
   assert.equal(DEFAULTS.window.height, 800);
   assert.equal(DEFAULTS.theme.mode, 'system');
+  assert.equal(DEFAULTS.appearance.brandTitle, '');
   assert.equal(DEFAULTS.tray.closeToTray, true);
   assert.equal(DEFAULTS.hotkey, 'CommandOrControl+Shift+D');
   assert.equal(DEFAULTS.hotkeySettings, 'CommandOrControl+,');
@@ -87,15 +88,23 @@ test('validateConfig 非法字段报错', () => {
     language: 'xx-XX',
     window: { x: null, y: null, width: 100, height: 800, maximized: 'yes' },
     theme: { mode: 'blue' },
+    appearance: { brandTitle: 'x'.repeat(41) },
     dsh: { ...DEFAULTS.dsh, port: 99999 },
     bridge: { ...DEFAULTS.bridge, token: 42 }
   };
   const { ok, errors } = validateConfig(bad);
   assert.equal(ok, false);
   const paths = errors.map((e) => e.path);
-  for (const p of ['language', 'window.width', 'window.maximized', 'theme.mode', 'dsh.port', 'bridge.token']) {
+  for (const p of ['language', 'window.width', 'window.maximized', 'theme.mode', 'appearance.brandTitle', 'dsh.port', 'bridge.token']) {
     assert.ok(paths.includes(p), `应报错 ${p}，实际: ${paths.join(',')}`);
   }
+});
+
+test('侧栏品牌文字支持持久化并限制控制字符', () => {
+  const merged = mergeConfig(DEFAULTS, { appearance: { brandTitle: '我的 DSH' } }, {});
+  assert.equal(merged.appearance.brandTitle, '我的 DSH');
+  assert.equal(validateConfig(merged).ok, true);
+  assert.equal(validateConfig({ ...merged, appearance: { brandTitle: 'bad\ntext' } }).ok, false);
 });
 
 test('createConfigStore 原子写 + 重新加载', () => {

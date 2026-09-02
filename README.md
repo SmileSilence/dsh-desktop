@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 
@@ -94,9 +94,9 @@ npm run build
 `DEEPSEEK_API_KEY` 中未配置密钥，会弹出引导窗口，可填写 DeepSeek API Key 或选择稍后
 在 DSH 界面「模型设置」中配置。
 
-**v1.2.1 启动修复（源码版本，尚未发布）**：安装版能够从可执行文件所在目录探测相邻的 `deepseek-harness`，也支持任意位置的路径设置。`DSH_REPO_ROOT` 优先于设置；指定路径无效时直接提示，不转用 npx 下载。使用源码仓库前必须完成 `pnpm install --frozen-lockfile` 和 `pnpm run build`。
+**v1.3.1 启动、插件共享、界面定制与更新检查修复（源码版本，尚未发布）**：安装版能够从可执行文件所在目录探测相邻的 `deepseek-harness`，也支持任意位置的路径设置。`DSH_REPO_ROOT` 优先于设置；指定路径无效时直接提示，不转用 npx 下载。使用源码仓库前必须完成 `pnpm install --frozen-lockfile` 和 `pnpm run build`。
 
-新版 DSH 会输出带登录凭据的链接。桌面端通过自身浏览器会话交换 Cookie（登录状态），确认页面返回成功响应后再加载；401 不再被误判为就绪。默认尝试复用 3080，无法复用时使用 3092；显式配置其他端口时使用该端口。被占用且无法认证的端口会明确报错。
+新版 DSH 会输出带登录凭据的链接。桌面端通过自身浏览器会话交换 Cookie（登录状态），确认页面返回成功响应后再加载；401 不再被误判为就绪。默认使用 3080 端口：若该端口已有 DSH Web 服务则直接复用（与本机浏览器共享同一实例和插件）；服务存在但桌面会话未认证时，弹出登录引导粘贴登录链接完成认证；未检测到服务时由桌面端在该端口启动。显式配置其他端口时使用该端口。被占用且非 DSH 服务的端口会明确报错。
 
 首次 npx 下载可能超过 90 秒。超时后请在终端完成 `npm install -g @deepseek-ai/dsh` 再重试；桌面端不会无限等待。详细操作见 [快速开始](QUICKSTART.md)，本次故障总结和验证方式见 [启动修复说明](docs/startup-repair.md)。
 
@@ -128,6 +128,7 @@ npm run build
 {
   "window": { "width": 1200, "height": 800, "tabPosition": "top" },
   "theme": { "mode": "system" },
+  "appearance": { "brandTitle": "" },
   "tray": { "autoLaunch": false, "closeToTray": true, "showInTaskbar": true, "topMost": false },
   "hotkey": "CommandOrControl+Shift+D",
   "hotkeySettings": "CommandOrControl+,",
@@ -159,7 +160,7 @@ dsh-desktop/
 ├── LICENSE              # 开源协议
 ├── assets/              # 资源文件（图标等）
 └── dist/                # 打包输出
-    └── DeepSeek Harness-1.2.1-Setup.exe
+    └── DeepSeek Harness-1.3.1-Setup.exe
 ```
 
 ---
@@ -303,7 +304,24 @@ npm run build:win
 
 ## 📝 更新日志
 
-### v1.2.1（源码版本，尚未发布）
+### v1.3.1（源码版本，尚未发布）
+
+- 关于页拆分为“DSH Desktop 更新”和“DSH 后端更新”，避免检查对象混淆。
+- 桌面版手动检查直连 GitHub 最新正式 Release，发现新版时可打开下载页。
+- GitHub 网络、限流、无 Release、响应及版本格式错误分别提示，失败不会写入成功检查时间。
+
+### v1.3.0
+
+- 新增「外观设置 → 侧栏品牌文字」，可动态替换“DSH 本地构建”；留空恢复 DSH 默认标题。
+- 设置保存后对全部 DSH 页签即时生效并持久化，无需重新构建 DSH Web。
+
+### v1.2.2
+
+- 固定复用配置端口（默认 `web:3080`），不再因桌面会话缺少 Cookie 而回退到 3092，避免同时运行两个插件状态不同的 Web 实例。
+- 端口上已有未认证的 DSH Web 时弹出登录引导；认证成功后重载所有页签，并继续模型 API Key 引导。
+- 严格校验登录链接必须为当前本机 HTTP 端口，登录凭据不会写入日志或页面基础地址。
+
+### v1.2.1
 
 - 修复安装目录仓库探测、显式路径校验及缺依赖/缺构建产物提示。
 - 支持新版 DSH 登录链接和浏览器 Cookie，严格检查响应状态，按完整行隐藏凭据。

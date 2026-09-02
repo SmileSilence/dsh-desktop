@@ -29,11 +29,15 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   onApiKeySaved: (cb) => { ipcRenderer.on('api-key-saved', () => cb()); },
   onApiKeyError: (cb) => { ipcRenderer.on('api-key-error', (e, msg) => cb(msg)); },
 
+  // DSH Web 登录引导窗
+  loginDsh: (url) => ipcRenderer.invoke('dsh-login', url),
+
   // 设置窗（fallback）
   saveSettings: (cfg) => ipcRenderer.send('save-settings', cfg),
   refreshDshStatus: () => ipcRenderer.send('refresh-dsh-status'),
   onDshStatusUpdated: (cb) => { ipcRenderer.on('dsh-status-updated', (e, status) => cb(status)); },
   getInternalPageData: () => ipcRenderer.invoke('internal-page-data'),
+  checkAppUpdate: () => ipcRenderer.invoke('internal-app-check-update'),
   checkDshUpdate: () => ipcRenderer.invoke('internal-dsh-check-update'),
   updateDsh: (confirm) => ipcRenderer.invoke('internal-dsh-update', confirm === true),
   confirm: (message) => ipcRenderer.invoke('internal-confirm', message),

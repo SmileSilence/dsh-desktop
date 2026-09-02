@@ -16,7 +16,7 @@ const os = require('os');
 const { createConfigStore } = require('./config');
 const { createLogger } = require('./logging');
 const { createDshServer } = require('./dsh-server');
-const { createSessionProbe } = require('./dsh-runtime');
+const { createSessionProbe, probeDshService } = require('./dsh-runtime');
 const { escapeHtml } = require('./lib/escape-html');
 const { compareSemver } = require('./lib/semver');
 const { createMainWindow: createMainWindowFactory, applyThemeToChrome, chromeColorsFor } = require('./window');
@@ -57,6 +57,7 @@ const dshServer = createDshServer({
   projectRoot: PROJECT_ROOT,
   getDshConfig: getRuntimeConfig,
   probeUrl: createSessionProbe(() => session.defaultSession, options => net.request(options)),
+  probeDshService: (address, options) => probeDshService(address, { ...options, requestImpl: opts => net.request(opts) }),
   logger
 });
 // P3 模块实例（B7 通知 / G1 本地 DSH 更新）
@@ -118,6 +119,30 @@ const LANG = {
   tabPositionTop: '顶部页签',
   tabPositionLeft: '左侧页签',
   tabPositionRight: '右侧页签',
+  brandTitleLabel: '侧栏品牌文字',
+  brandTitlePlaceholder: '留空显示“DSH 本地构建”',
+  appUpdateTitle: 'DSH Desktop 更新',
+  appUpdatePrompt: '点击“检查桌面版更新”获取 GitHub 最新正式版本。',
+  appUpdateCheck: '检查桌面版更新',
+  appUpdateOpenDownload: '打开下载页',
+  appUpdateChecking: '正在检查 DSH Desktop 更新…',
+  appUpdateAvailable: '发现可用更新',
+  appUpdateCurrent: '已是最新版本或当前版本更新',
+  appUpdateFailed: '检查失败',
+  appUpdateRateLimited: 'GitHub 请求受限，请稍后重试。',
+  appUpdateNoRelease: 'GitHub 尚无正式 Release。',
+  appUpdateInvalidResponse: 'GitHub 返回了无法解析的响应。',
+  appUpdateInvalidVersion: 'Release 版本格式无法识别。',
+  appUpdateTimeout: '连接 GitHub 超时，请检查网络后重试。',
+  appUpdateNetworkError: '无法连接 GitHub，请检查网络或代理设置。',
+  versionCurrent: '当前',
+  versionLatest: '最新',
+  versionUnknown: '未知',
+  dshUpdateTitle: 'DSH 后端更新',
+  dshUpdatePrompt: '点击“检查后端更新”获取当前版本和 npm 最新版本。',
+  dshUpdateCheck: '检查后端更新',
+  dshUpdateAction: '更新 DSH 后端',
+  dshUpdateChecking: '正在检查 DSH 后端更新…',
 
   // 语言选项
   langChinese: '中文',
@@ -138,7 +163,7 @@ const LANG = {
 
   // 关于
   aboutTitle: '关于 DSH Desktop',
-  aboutVersion: '版本：1.2.1',
+  aboutVersion: '版本：1.3.1',
   aboutDescription: '类 ChatGPT 桌面客户端 - AI 助手',
   aboutAuthor: '作者：SmileSilence',
   aboutLicense: '许可证：MIT',
@@ -224,6 +249,30 @@ function loadLanguage(lang) {
       tabPositionTop: 'Top',
       tabPositionLeft: 'Left',
       tabPositionRight: 'Right',
+      brandTitleLabel: 'Sidebar Brand Text',
+      brandTitlePlaceholder: 'Leave empty to use “DSH Local Build”',
+      appUpdateTitle: 'DSH Desktop Update',
+      appUpdatePrompt: 'Check the latest stable GitHub Release for DSH Desktop.',
+      appUpdateCheck: 'Check Desktop Update',
+      appUpdateOpenDownload: 'Open Download Page',
+      appUpdateChecking: 'Checking for DSH Desktop updates…',
+      appUpdateAvailable: 'Update available',
+      appUpdateCurrent: 'Up to date or newer than the latest release',
+      appUpdateFailed: 'Update check failed',
+      appUpdateRateLimited: 'GitHub rate limit reached. Please try again later.',
+      appUpdateNoRelease: 'No stable GitHub Release is available.',
+      appUpdateInvalidResponse: 'GitHub returned an invalid response.',
+      appUpdateInvalidVersion: 'The Release version format is invalid.',
+      appUpdateTimeout: 'GitHub request timed out. Check your network and retry.',
+      appUpdateNetworkError: 'Unable to reach GitHub. Check your network or proxy.',
+      versionCurrent: 'Current',
+      versionLatest: 'Latest',
+      versionUnknown: 'Unknown',
+      dshUpdateTitle: 'DSH Backend Update',
+      dshUpdatePrompt: 'Check the current backend version and the latest npm version.',
+      dshUpdateCheck: 'Check Backend Update',
+      dshUpdateAction: 'Update DSH Backend',
+      dshUpdateChecking: 'Checking for DSH backend updates…',
       langChinese: '中文',
       langEnglish: 'English',
       langJapanese: '日本語',
@@ -236,7 +285,7 @@ function loadLanguage(lang) {
       msgRestart: 'Restart',
       msgLater: 'Later',
       aboutTitle: 'About DSH Desktop',
-      aboutVersion: 'Version: 1.2.1',
+      aboutVersion: 'Version: 1.3.1',
       aboutDescription: 'ChatGPT-like Desktop Client - AI Assistant',
       aboutAuthor: 'Author: SmileSilence',
       aboutLicense: 'License: MIT',
@@ -274,6 +323,7 @@ let tabManager;
 let shellReadyPromise = Promise.resolve();
 let appContentReady = false;
 let isQuitting = false;
+let loginGuideWin = null;
 
 function getConfig() {
   return configStore.get();
@@ -306,6 +356,7 @@ const trayModule = createTrayModule({
 const injector = createInjector({
   getDshUrl: () => dshServer.dshUrl(),
   getThemeMode: () => themeMode(),
+  getBrandTitle: () => getConfig().appearance?.brandTitle || '',
   getBridgeInfo: () => (bridgeServer.getPort() ? {
     bridgeBaseUrl: `http://127.0.0.1:${bridgeServer.getPort()}`,
     token: getConfig().bridge.token
@@ -385,6 +436,7 @@ function applyConfigToRuntime(next) {
   }
   tabManager?.layout();
   tabManager?.publish();
+  tabManager?.refreshInjections();
   createMenu();
   updateTrayMenu();
   registerHotkeys(); // 快捷键变更即时生效
@@ -410,7 +462,7 @@ function applyWindowAction(action) {
 }
 
 /** 更新检查（B6 / P3.2）：GitHub Releases + compareSemver + 节流 */
-function checkAppUpdate() {
+function checkAppUpdate(force = false) {
   return checkForUpdate({
     getCurrentVersion: () => app.getVersion(),
     getRepository: () => {
@@ -423,6 +475,7 @@ function checkAppUpdate() {
       try { configStore.set({ updater: { lastChecked: ts } }); } catch (e) { /* 忽略 */ }
     },
     compare: compareSemver,
+    force,
     logger
   });
 }
@@ -628,6 +681,103 @@ function ensureApiKeyGuide() {
   }
   logger.log('未检测到模型 API Key，弹出配置引导');
   showApiKeySetupGuide();
+}
+
+/**
+ * 复用已有 DSH Web 服务但桌面端会话尚未认证时，弹出登录引导。
+ * 用户在启动该服务的终端中复制 `dsh web:` 打印的登录链接，粘贴到此处完成认证。
+ */
+function showDshLoginGuide() {
+  if (loginGuideWin && !loginGuideWin.isDestroyed()) {
+    loginGuideWin.show();
+    loginGuideWin.focus();
+    return;
+  }
+  const guideWin = new BrowserWindow({
+    width: 640,
+    height: 460,
+    title: '登录 DSH Web 服务',
+    parent: mainWindow,
+    modal: true,
+    resizable: false,
+    webPreferences: EMBEDDED_WINDOW_PREFS
+  });
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+          background: #1a1a2e; color: #fff; padding: 24px;
+        }
+        h1 { font-size: 20px; margin-bottom: 6px; }
+        .sub { color: #8892b0; font-size: 13px; margin-bottom: 14px; line-height: 1.6; }
+        ol { color: #8892b0; font-size: 13px; margin: 0 0 14px 20px; line-height: 1.7; }
+        ol a { color: #667eea; }
+        label { display: block; font-size: 13px; color: #8892b0; margin-bottom: 6px; }
+        input {
+          width: 100%; padding: 10px 12px; font-size: 13px; border-radius: 6px;
+          border: 1px solid #233554; background: #0a192f; color: #fff;
+          font-family: Consolas, monospace; margin-bottom: 10px; outline: none;
+        }
+        input:focus { border-color: #667eea; }
+        .btn-group { display: flex; gap: 10px; }
+        .btn {
+          flex: 1; padding: 10px 0; border: none; border-radius: 6px; cursor: pointer;
+          font-size: 14px; font-weight: 600;
+        }
+        .btn-primary { background: #667eea; color: #fff; }
+        .btn-primary:hover { background: #5a6fd6; }
+        .btn-secondary { background: transparent; color: #8892b0; border: 1px solid #233554; }
+        .btn-secondary:hover { background: #16213e; }
+        #status { margin-top: 14px; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
+        .ok { color: #4ade80; }
+        .err { color: #f87171; }
+      </style>
+    </head>
+    <body>
+      <h1>🔑 登录 DSH Web 服务</h1>
+      <div class="sub">检测到 <b>${escapeHtml(dshServer.dshUrl())}</b> 上已有 DSH Web 服务在运行（与本机浏览器共用同一实例和插件）。桌面端需要一次登录才能显示该服务。</div>
+      <ol>
+        <li>在<b>启动该服务的终端</b>中找到 <code>dsh web: http://127.0.0.1:${escapeHtml(String(runtimeBackendPort))}/?token=...</code> 那一行；</li>
+        <li>复制<b>整行链接</b>（含 <code>?token=</code> 部分）粘贴到下方输入框；</li>
+        <li>点击「完成登录」。桌面端会用该链接完成认证，随后自动打开服务页面。</li>
+      </ol>
+      <label for="link">DSH Web 登录链接</label>
+      <input type="text" id="link" placeholder="http://127.0.0.1:3080/?token=" spellcheck="false" autocomplete="off" onkeydown="if(event.key==='Enter') login()">
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="skip()">跳过，稍后登录</button>
+        <button class="btn btn-primary" onclick="login()">完成登录</button>
+      </div>
+      <div id="status"></div>
+      <script>
+        const api = window.dshDesktop;
+        async function login() {
+          const url = document.getElementById('link').value.trim();
+          if (!url) {
+            document.getElementById('status').innerHTML = '<span class="err">请粘贴登录链接。</span>';
+            return;
+          }
+          document.getElementById('status').innerHTML = '<span class="sub">正在登录…</span>';
+          const result = await api.loginDsh(url);
+          document.getElementById('status').innerHTML = result.ok
+            ? '<span class="ok">✔ 登录成功，即将打开服务页面。</span>'
+            : '<span class="err">登录失败：' + result.message + '</span>';
+          if (result.ok) setTimeout(() => window.close(), 900);
+        }
+        function skip() { window.close(); }
+      </script>
+    </body>
+    </html>
+  `;
+
+  guideWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  guideWin.on('closed', () => { if (loginGuideWin === guideWin) loginGuideWin = null; });
+  loginGuideWin = guideWin;
 }
 
 // ============ 创建主窗口（P1.2：window.js 接管 WCO + 状态记忆） ============
@@ -851,6 +1001,21 @@ ipcMain.on('skip-api-key', (event) => {
   }
 });
 
+ipcMain.handle('dsh-login', async (event, loginUrl) => {
+  if (!loginGuideWin || loginGuideWin.isDestroyed() || BrowserWindow.fromWebContents(event.sender) !== loginGuideWin) {
+    return { ok: false, message: '仅允许登录引导窗口发起登录。' };
+  }
+  try {
+    await dshServer.login(String(loginUrl || ''));
+    // 认证成功后重载所有已打开的页签，让共享服务页面带上会话 Cookie。
+    tabManager?.reloadAll?.();
+    setTimeout(ensureApiKeyGuide, 1000);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: escapeHtml(err.message) };
+  }
+});
+
 function isInternalPageSender(event) {
   const expected = pathToFileURL(path.join(__dirname, 'internal.html')).href;
   return typeof event.sender?.getURL === 'function' && event.sender.getURL().startsWith(expected);
@@ -904,6 +1069,11 @@ ipcMain.on('open-external', (event, url) => {
 ipcMain.handle('internal-dsh-check-update', async (event) => {
   if (!isInternalPageSender(event)) throw new Error('仅允许内置页面检查 DSH 更新');
   return dshUpdate.checkUpdate(true);
+});
+
+ipcMain.handle('internal-app-check-update', async (event) => {
+  if (!isInternalPageSender(event)) throw new Error('仅允许内置页面检查桌面客户端更新');
+  return checkAppUpdate(true);
 });
 
 ipcMain.handle('internal-dsh-update', async (event, confirm) => {
@@ -1002,6 +1172,7 @@ app.whenReady().then(async () => {
   app.setName(currentLang.appName);
 
   // 启动 IPC 桥（P2.2）：随机 token 写入 config.bridge（不入用户编辑面）
+  let needsDshLogin = false;
   try {
     const token = bridgeServer.generateToken();
     configStore.set({ bridge: { port: 0, token } });
@@ -1031,12 +1202,17 @@ app.whenReady().then(async () => {
 
   try {
     // 直接复用 web profile：浏览器端已安装及以后安装的插件无需复制即可使用。
-    // 仅复用当前浏览器会话可访问的服务，否则使用回退端口启动同一 profile。
-    if (runtimeBackendPort === 3080 && !(await dshServer.isServerReady())) {
-      runtimeBackendPort = 3092;
-      logger.log('web:3080 未运行或不可用，桌面端改用 web:3092');
+    // 配置端口（默认 3080）上已有 DSH Web 服务则直接复用，与本机浏览器共享同一实例和插件；
+    // 未检测到服务时由 start() 在该端口拉起新实例。不再回退到 3092，避免两个实例插件不同步。
+    if (runtimeBackendPort === 3080 && !(await dshServer.hasDshService())) {
+      logger.log('web:3080 未检测到 DSH Web 服务，桌面端将在 3080 端口启动');
     }
-    await dshServer.start();
+    const started = await dshServer.start();
+    if (started && started.authenticated === false) {
+      needsDshLogin = true;
+      logger.log('web:3080 已有 DSH Web 服务但桌面端尚未认证，弹出登录引导');
+      showDshLoginGuide();
+    }
   } catch (err) {
     logger.logError(`服务启动失败: ${err.message}`);
 
@@ -1059,7 +1235,7 @@ app.whenReady().then(async () => {
   }
 
   // 首次启动引导：未配置模型 API Key 时弹出引导窗口
-  ensureApiKeyGuide();
+  if (!needsDshLogin) ensureApiKeyGuide();
 
   // G1：启动时按 dsh.checkOnStartup 静默检查本地 DSH 更新（默认关，发现新版仅发通知，不自动更新）
   if (getConfig().dsh.checkOnStartup) {

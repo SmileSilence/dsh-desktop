@@ -96,6 +96,63 @@ function probeSessionRequest(address, options, getSession, requestImpl) {
   });
 }
 
+/**
+ * 探测地址是否由 DSH Web 服务应答（无需浏览器会话认证）。
+ * 未认证的 DSH Web 返回 401 + 特征文本；已认证返回 2xx；登录流 303 也视为 DSH 服务。
+ * 用于区分"端口上有 DSH 服务（即使未认证）"与"端口无服务/被其他程序占用"。
+ */
+function probeDshService(address, { requestImpl, signal, timeoutMs = 3000 } = {}) {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise(resolve => {
+    let request;
+    let settled = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      request?.abort();
+      resolve(result);
+    };
+    const abort = () => finish(false);
+    const timer = setTimeout(abort, timeoutMs);
+    signal?.addEventListener('abort', abort, { once: true });
+    const inspect = response => {
+      let body = '';
+      try { response.setEncoding('utf8'); } catch { /* 忽略：body 以文本读取 */ }
+      response.on('data', chunk => { body = (body + chunk).slice(0, 256); });
+      response.on('error', abort);
+      response.on('end', () => {
+        const status = typeof response.statusCode === 'number' ? response.statusCode : 0;
+        finish((status >= 200 && status < 300)
+          || (status === 401 && body.includes('dsh web authentication required')));
+      });
+      response.resume();
+    };
+    try {
+      if (requestImpl) {
+        request = requestImpl({ url: address, credentials: 'omit', redirect: 'manual' });
+        request.on('error', abort);
+        request.on('redirect', (_status, _method, destination) => {
+          try {
+            if (new URL(destination, address).origin === new URL(address).origin) finish(true);
+          } catch { finish(false); }
+        });
+        request.on('response', inspect);
+        request.end();
+      } else {
+        fetch(address, { redirect: 'manual', signal }).then(response => {
+          response.text().then(text => {
+            const status = response.status;
+            finish((status >= 200 && status < 300)
+              || (status === 401 && text.includes('dsh web authentication required')));
+          }).catch(abort);
+        }).catch(abort);
+      }
+    } catch { finish(false); }
+  });
+}
+
 /** 使用页面会话；Electron 传入 net.request，非 Electron 检查可使用标准 fetch。 */
 function createSessionProbe(getSession, requestImpl) {
   return async (address, { signal, timeoutMs = 3000 } = {}) => {
@@ -157,4 +214,4 @@ function terminateProcessTree(child, { platform = process.platform, execFileImpl
 }
 //#endregion
 
-module.exports = { redactOutput, createLineReader, parseLaunchUrl, createSessionProbe, terminateProcessTree };
+module.exports = { redactOutput, createLineReader, parseLaunchUrl, createSessionProbe, probeDshService, terminateProcessTree };

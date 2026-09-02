@@ -158,6 +158,7 @@ dsh-desktop/
 {
   "window":    { "x": null, "y": null, "width": 1200, "height": 800, "maximized": false },
   "theme":     { "mode": "system" },            // system | dark | light（B1）
+  "appearance": { "brandTitle": "" },           // 侧栏品牌文字，空=DSH 默认标题
   "tray":      { "closeToTray": true, "showInTaskbar": true, "autoLaunch": false },
   "hotkey":    "CommandOrControl+Shift+D",
   "dsh":       {
@@ -268,7 +269,7 @@ export function apply(ctx: ClientContext): void {
 | 外观 | 主题（跟随系统/深色/浅色） |
 | 快捷键 | 全局呼出键 |
 | DSH | 仓库路径、端口、profile、代理、附加环境变量、后端状态+重启、**本地 DSH 更新**（版本/检查/更新/静默检查开关，见 §16.4） |
-| 关于/更新 | 版本、检查更新 |
+| 关于/更新 | 桌面客户端版本与 GitHub Release 检查；DSH 后端版本与 npm 检查/更新 |
 
 ### 6.3 安装集成
 - `scripts/install-plugin.ps1`：构建插件 bundle → 在目标 profile 执行 `dsh plugin add <本地 file: 引用>`；
@@ -457,7 +458,7 @@ export function apply(ctx: ClientContext): void {
 | 外观 | 单选（system/dark/light） | `theme.mode` |
 | 快捷键 | 输入框（录制或手填） | `hotkey` |
 | DSH | 路径输入 / 端口数字 / profile / 代理 / 后端状态+重启 / **本地 DSH 更新**（版本/检查/更新/静默检查开关，见 §16.4） | `dsh.*` |
-| 关于/更新 | 版本展示 + 检查更新按钮 | — |
+| 关于/更新 | 桌面版 GitHub Release 检查/下载页 + DSH 后端检查/更新 | — |
 
 **桥客户端**：`bridge-client.ts` 封装 `fetch(baseUrl, token)`，失败按 `401`（token 过期 → 提示重启应用）与 `5xx`（桥未就绪 → 显示重试）分级。
 
@@ -500,7 +501,7 @@ resolveLaunch(config.dsh):
 
 `dsh-runtime.js` 提供完整行解析、凭据脱敏、正式登录链接解析、浏览器会话探测和进程树终止。主入口向服务工厂注入 `session.defaultSession` 与 `net.request`；逐跳检查同源地址再调用 `followRedirect()`，取得 Cookie 后最终 2xx 才视为就绪。采用 ClientRequest 是因为当前 Electron 的 `fetch(..., {redirect:'manual'})` 会拒绝重定向；接口语义见 [Electron ClientRequest 文档](https://www.electronjs.org/docs/latest/api/client-request/)。
 
-`dshUrl()` 与 `status().url` 始终返回无凭据的基础地址。登录链接仅留在本次启动内存中，认证成功、退出、取消时清除；错误、日志和诊断只能读取完整行脱敏后的内容。401/403/404/5xx 不算成功。默认 3080 无法复用时回退 3092；显式其他端口直接使用，无法认证的占用端口不重新启动子进程。
+`dshUrl()` 与 `status().url` 始终返回无凭据的基础地址。登录链接仅留在本次启动内存中，认证成功、退出、取消时清除；错误、日志和诊断只能读取完整行脱敏后的内容。401/403/404/5xx 不算已认证，但 401 的 DSH 特征响应可用于确认服务存在。配置端口（默认 3080）上已有 DSH Web 时始终复用；桌面会话未认证则弹出登录引导，不再回退 3092。端口被非 DSH 程序占用时不重新启动子进程。
 
 启动、停止和重启各自合并并发请求。一次启动持有取消控制器、进程引用和独立输出缓冲，旧轮次事件不能修改新状态。停止或失败取消 HTTP 请求及计时器，并在 Windows 结束持有 PID 的进程树；清理失败阻止再次启动。复用的外部服务没有进程所有权，因此退出时不终止。桥接重启接口必须等待该异步操作完成。
 

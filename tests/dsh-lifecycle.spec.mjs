@@ -65,6 +65,7 @@ function fixture(options = {}) {
     logger: { log: message => logs.push(message), logError: message => logs.push(message) },
     isPortInUse: options.isPortInUse || (async () => false),
     probeUrl: options.probeUrl || (async () => true),
+    probeDshService: options.probeDshService || (async () => false),
     spawn: (cmd, args, spawnOptions) => {
       if (options.spawnError) throw options.spawnError;
       const child = new EventEmitter();
@@ -153,17 +154,53 @@ test('并发启动只创建一个子进程，停止只清理持有的进程', as
 });
 
 test('已有可访问服务只复用，stop 不终止外部进程', async () => {
-  const f = fixture({ isPortInUse: async () => true });
-  assert.equal((await f.server.start()).reused, true);
+  const f = fixture({ isPortInUse: async () => true, probeUrl: async () => true });
+  const result = await f.server.start();
+  assert.equal(result.reused, true);
+  assert.equal(result.authenticated, true);
   await f.server.stop();
   assert.equal(f.children.length, 0);
   assert.deepEqual(f.killed, []);
 });
 
-test('占用且不可认证的端口明确失败，不叠加启动', async () => {
-  const f = fixture({ isPortInUse: async () => true, probeUrl: async () => false });
+test('端口有 DSH 服务但未认证时复用，标记 authenticated=false 且不启动子进程', async () => {
+  const f = fixture({ isPortInUse: async () => true, probeUrl: async () => false, probeDshService: async () => true });
+  const result = await f.server.start();
+  assert.equal(result.reused, true);
+  assert.equal(result.authenticated, false);
+  assert.equal(f.children.length, 0);
+  assert.equal(f.server.status().ready, true);
+  await f.server.stop();
+  assert.deepEqual(f.killed, []);
+});
+
+test('占用且非 DSH 服务（可认证也失败）明确报错，不叠加启动', async () => {
+  const f = fixture({ isPortInUse: async () => true, probeUrl: async () => false, probeDshService: async () => false });
   await assert.rejects(f.server.start(), { code: 'PORT_UNAVAILABLE' });
   assert.equal(f.children.length, 0);
+});
+
+test('hasDshService 报告端口上的 DSH 服务存在性', async () => {
+  const f = fixture({ probeDshService: async () => true });
+  assert.equal(await f.server.hasDshService(), true);
+  const g = fixture({ probeDshService: async () => false });
+  assert.equal(await g.server.hasDshService(), false);
+});
+
+test('login 仅接受本机当前端口的 DSH Web 登录链接', async () => {
+  const f = fixture({ cfg: { path: root, port: 3080, profile: 'web' } });
+  assert.equal(await f.server.login('http://127.0.0.1:3080/?token=abc'), true);
+  await assert.rejects(f.server.login('http://127.0.0.1:3092/?token=abc'), { code: 'INVALID_LOGIN_URL' });
+  await assert.rejects(f.server.login('http://example.com:3080/?token=abc'), { code: 'INVALID_LOGIN_URL' });
+  await assert.rejects(f.server.login('https://127.0.0.1:3080/?token=abc'), { code: 'INVALID_LOGIN_URL' });
+  await assert.rejects(f.server.login('http://user:pass@127.0.0.1:3080/?token=abc'), { code: 'INVALID_LOGIN_URL' });
+  await assert.rejects(f.server.login('http://127.0.0.1:3080/'), { code: 'INVALID_LOGIN_URL' });
+  await assert.rejects(f.server.login('not-a-url'), { code: 'INVALID_LOGIN_URL' });
+});
+
+test('login 认证失败抛出 LOGIN_FAILED', async () => {
+  const f = fixture({ cfg: { path: root, port: 3080, profile: 'web' }, probeUrl: async () => false });
+  await assert.rejects(f.server.login('http://127.0.0.1:3080/?token=abc'), { code: 'LOGIN_FAILED' });
 });
 
 test('进程提前退出携带末行日志立即失败', async () => {

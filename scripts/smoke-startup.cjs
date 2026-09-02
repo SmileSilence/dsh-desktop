@@ -86,12 +86,14 @@ async function main() {
     const cfg = structuredClone(DEFAULTS);
     cfg.dsh.path = backendRoot;
     cfg.dsh.port = port;
+    cfg.appearance.brandTitle = `DSH Smoke ${String(port)}`;
     for (const key of Object.keys(cfg)) if (key.startsWith('hotkey')) cfg[key] = '';
     fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(cfg));
     const reportFile = path.join(temporary, 'report.json');
     const quitFile = path.join(temporary, 'quit');
     const env = { ...process.env, DSH_REPO_ROOT: '', DSH_HOME: path.join(temporary, 'dsh-home'),
-      DSH_SMOKE_USER_DATA: userData, DSH_SMOKE_PORT: String(port), DSH_SMOKE_REPORT: reportFile, DSH_SMOKE_QUIT: quitFile };
+      DSH_SMOKE_USER_DATA: userData, DSH_SMOKE_PORT: String(port), DSH_SMOKE_BRAND_TITLE: cfg.appearance.brandTitle,
+      DSH_SMOKE_REPORT: reportFile, DSH_SMOKE_QUIT: quitFile };
     delete env.ELECTRON_RUN_AS_NODE;
     child = spawn(executable, [], { cwd: appDir, windowsHide: true, env, stdio: 'ignore' });
     let launchError;

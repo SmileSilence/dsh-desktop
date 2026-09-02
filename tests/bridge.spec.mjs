@@ -56,6 +56,11 @@ test('PATCH /api/settings 白名单通过', async () => {
   assert.deepEqual(r.json.data, { tray: { topMost: true } });
 });
 
+test('PATCH /api/settings 允许外观品牌文字', async () => {
+  const r = await makeRoutes()({ method: 'PATCH', pathname: '/api/settings', body: { appearance: { brandTitle: '我的 DSH' } } });
+  assert.equal(r.status, 200);
+});
+
 test('PATCH /api/settings 未知字段 → 422 UNKNOWN_FIELD', async () => {
   const r = await makeRoutes()({ method: 'PATCH', pathname: '/api/settings', body: { bridge: { token: 'x' } } });
   assert.equal(r.status, 422);

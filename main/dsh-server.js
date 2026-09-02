@@ -2,7 +2,7 @@
 
 const path = require('path');
 const os = require('os');
-const { redactOutput, createLineReader, parseLaunchUrl, createSessionProbe, terminateProcessTree } = require('./dsh-runtime');
+const { redactOutput, createLineReader, parseLaunchUrl, createSessionProbe, probeDshService, terminateProcessTree } = require('./dsh-runtime');
 
 /**
  * DSH 后端探测/启动/停止/重启（C1 / B5 / §15.4）。
@@ -69,6 +69,7 @@ function createDshServer(deps) {
   const clock = deps.clock || { setTimeout, clearTimeout };
   const terminate = deps.terminateProcess || terminateProcessTree;
   const probeUrl = deps.probeUrl || createSessionProbe(() => ({ fetch }));
+  const detectService = deps.probeDshService || probeDshService;
   let active = null;
   let starting = null;
   let stopping = null;
@@ -161,6 +162,22 @@ function createDshServer(deps) {
     });
   }
   async function isServerReady() { return probeUrl(dshUrl(), { timeoutMs: 3000 }); }
+  /** 端口上是否已有 DSH Web 服务在应答（无需本会话认证；区分\"有服务待登录\"与\"无服务\"）。 */
+  async function hasDshService() { return detectService(dshUrl(), { timeoutMs: 3000 }); }
+  /** 用登录链接为本会话完成认证（validate 登录行，调用方应已展示给用户）。 */
+  async function login(loginUrl, { signal, timeoutMs = 8000 } = {}) {
+    if (typeof loginUrl !== 'string' || !/^https?:\/\//i.test(loginUrl)) throw error('INVALID_LOGIN_URL', '登录链接格式不正确。');
+    const url = new URL(loginUrl);
+    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname)
+      || url.port !== String(dshConfig().port || 3080) || url.username || url.password
+      || url.pathname !== '/' || url.hash || [...url.searchParams.keys()].length !== 1
+      || !/^[A-Za-z0-9_-]+$/.test(url.searchParams.get('token') || '')) {
+      throw error('INVALID_LOGIN_URL', '登录链接不是本机当前端口的 DSH Web 登录链接。');
+    }
+    const ok = await probeUrl(url.href, { signal, timeoutMs });
+    if (!ok) throw error('LOGIN_FAILED', '登录链接未能完成认证，请确认服务正在运行且链接未过期。');
+    return true;
+  }
   //#endregion
 
   //#region 单次启动和输出
@@ -231,13 +248,23 @@ function createDshServer(deps) {
     const occupied = await isPortInUse(attempt.port);
     assertActive(attempt);
     if (occupied) {
-      if (!attempt.cfg.dedicated && await probeUrl(attempt.url, { signal: attempt.controller.signal, timeoutMs: 3000 })) {
+      if (!attempt.cfg.dedicated) {
+        const authenticated = await probeUrl(attempt.url, { signal: attempt.controller.signal, timeoutMs: 3000 });
         assertActive(attempt);
-        ready = true;
-        return { reused: true, port: attempt.port };
+        if (authenticated) {
+          ready = true;
+          return { reused: true, port: attempt.port, authenticated: true };
+        }
+        // 端口有 DSH Web 服务但本会话尚未认证：仍复用该服务，交由上层引导登录。
+        const present = await detectService(attempt.url, { signal: attempt.controller.signal, timeoutMs: 3000 });
+        assertActive(attempt);
+        if (present) {
+          ready = true;
+          return { reused: true, port: attempt.port, authenticated: false };
+        }
       }
       assertActive(attempt);
-      throw error('PORT_UNAVAILABLE', `端口 ${attempt.port} 已被占用，当前桌面会话无法访问该服务。请在原服务中完成登录，或关闭该服务后重试。`);
+      throw error('PORT_UNAVAILABLE', `端口 ${attempt.port} 已被占用，且不是当前桌面会话可访问的 DSH Web 服务。请关闭占用该端口的程序，或更换 dsh.port 后重试。`);
     }
     const facts = detectFacts();
     const launch = resolveLaunch(attempt.cfg, facts);
@@ -256,7 +283,7 @@ function createDshServer(deps) {
     assertActive(attempt);
     ready = true;
     logger.log?.('DSH Web 服务已就绪，浏览器会话认证完成。');
-    return { reused: false, source: launch.source, port: attempt.port };
+    return { reused: false, source: launch.source, port: attempt.port, authenticated: true };
   }
   //#endregion
 
@@ -335,7 +362,7 @@ function createDshServer(deps) {
   }
   //#endregion
 
-  return { start, stop, restart, isPortInUse, isServerReady, waitForServer, detectFacts, resolveLaunch, status, dshUrl };
+  return { start, stop, restart, isPortInUse, isServerReady, hasDshService, login, waitForServer, detectFacts, resolveLaunch, status, dshUrl };
 }
 
 module.exports = { resolveLaunch, createDshServer };

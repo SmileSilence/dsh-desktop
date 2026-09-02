@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { createLineReader, parseLaunchUrl, redactOutput, createSessionProbe } = require('../main/dsh-runtime.js');
+const { createLineReader, parseLaunchUrl, redactOutput, createSessionProbe, probeDshService } = require('../main/dsh-runtime.js');
 
 test('UTF-8 字符和登录凭据跨数据块时，直到行结束才处理', () => {
   const lines = [];
@@ -147,4 +147,24 @@ test('Electron 挂起请求在取消后被 abort', async () => {
   });
   assert.equal(await probe('http://127.0.0.1:3092', { signal: controller.signal }), false);
   assert.equal(aborted, true);
+});
+
+test('probeDshService 在 401 认证提示与 2xx 时判定为 DSH 服务', async () => {
+  for (const [body, statusCode, expected] of [
+    ['dsh web authentication required; reopen the URL printed by dsh web.', 401, true],
+    ['page', 200, true],
+    ['page', 404, false],
+    ['page', 500, false]
+  ]) {
+    const server = createServer((req, res) => { res.writeHead(statusCode); res.end(body); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/`;
+      assert.equal(await probeDshService(base), expected, `status=${statusCode} body=${body}`);
+    } finally { server.closeAllConnections(); server.close(); }
+  }
+});
+
+test('probeDshService 连接失败返回 false', async () => {
+  assert.equal(await probeDshService('http://127.0.0.1:9/'), false);
 });
