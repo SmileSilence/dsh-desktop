@@ -6,8 +6,13 @@
  * - createMainWindow(deps)：窗口状态记忆（move/resize/maximize → config.window，启动恢复）。
  */
 
-const { BrowserWindow, screen } = require('electron');
 const os = require('os');
+
+// Electron 的安装脚本在部分 CI 场景会被禁用。仅在真正创建窗口或读取
+// 显示器信息时加载 Electron，使纯函数单元测试不依赖 Electron 二进制。
+function electronApi() {
+  return require('electron');
+}
 
 function isWin11(platform = process.platform, release = os.release()) {
   if (platform !== 'win32') return false;
@@ -104,7 +109,7 @@ function restoreWindowBounds(w, defaultSize, getDisplays) {
 
   if (typeof w.x === 'number' && typeof w.y === 'number') {
     // 检查窗口是否仍在任一显示器可视区域内
-    const displays = getDisplays ? getDisplays() : screen.getAllDisplays();
+    const displays = getDisplays ? getDisplays() : electronApi().screen.getAllDisplays();
     const visible = displays.some((d) => {
       const a = d.workArea;
       return w.x < a.x + a.width - 40 && w.y < a.y + a.height - 40 &&
@@ -135,6 +140,7 @@ function restoreWindowBounds(w, defaultSize, getDisplays) {
  * @returns {BrowserWindow}
  */
 function createMainWindow(deps) {
+  const { BrowserWindow } = electronApi();
   const { getDshUrl, getConfig, saveConfig, getThemeMode, title, icon, preload, onDidFailLoad, onClose, onReady, logger = {} } = deps;
 
   const cfg = getConfig();
