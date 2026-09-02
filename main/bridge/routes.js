@@ -134,7 +134,7 @@ function createRoutes(services) {
     // POST /api/backend/restart
     if (method === 'POST' && pathname === '/api/backend/restart') {
       try {
-        return ok(services.restartBackend());
+        return ok(await services.restartBackend());
       } catch (e) {
         return fail(500, 'RESTART_FAILED', e.message);
       }

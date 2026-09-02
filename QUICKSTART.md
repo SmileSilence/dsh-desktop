@@ -1,104 +1,68 @@
-# 🚀 快速开始
+# DSH Desktop 快速开始
 
-DSH Desktop 是 DeepSeek Harness 的桌面客户端（Electron 壳），连接 `http://127.0.0.1:3080` 的 DSH Web 服务。
+DSH Desktop 是 DeepSeek Harness 的桌面客户端。当前源码版本为 1.2.1；桌面安装包本身不内置完整后端。
 
----
+## 准备后端
 
-## 方式1：开发模式运行
+使用满足 DeepSeek Harness 仓库 `engines` 要求的 Node.js，并安装 pnpm。选择已有源码仓库时，在该仓库目录打开 PowerShell：
 
-```bash
-cd dsh-desktop
-npm install
+```powershell
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+在桌面设置中填写仓库路径，或配置用户环境变量（示例路径应替换为实际位置）：
+
+```powershell
+[Environment]::SetEnvironmentVariable('DSH_REPO_ROOT', 'D:\Apps\deepseek-harness', 'User')
+```
+
+重新打开桌面端以读取环境变量。环境变量优先于设置；无效时需要修正或清除，不能仅修改设置覆盖它。安装目录相邻的 `deepseek-harness` 也会自动被识别。
+
+也可以先全局安装后端：
+
+```powershell
+npm install -g @deepseek-ai/dsh
+```
+
+首次安装可能超过 90 秒，应等待上述命令结束，再启动桌面端。
+
+## 启动和认证
+
+安装版直接打开 `DeepSeek Harness.exe`。源码开发模式在本项目目录执行：
+
+```powershell
+npm ci
 npm start
 ```
 
----
+桌面端默认尝试复用当前浏览器会话可访问的 3080 服务；无法复用时在 3092 启动后端。配置了其他端口时直接使用该端口。已有服务返回 401 表示当前会话未认证，不代表服务未运行；无法复用的占用端口不会被强制接管。
 
-## 方式2：一键构建两个分发版本（推荐）
+桌面端自动处理本次后端启动输出的登录链接，使用自己的浏览器 Cookie 保存登录状态，页面地址和诊断信息不包含登录凭据。模型 API Key 与网页登录是两回事，请在应用配置引导中填写模型密钥，或稍后在模型设置中配置。
+
+关闭窗口默认隐藏到托盘；从托盘退出才结束桌面端创建的后端进程树。外部启动、被桌面复用的服务不会被停止。
+
+## 测试和构建
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1
+npm test
+npm run test:startup -- 'D:\Apps\deepseek-harness'
 ```
 
-完全离线构建（不依赖网络），产出两个文件到 `dist/`：
+第二条命令适用于 Windows，需要已安装本项目开发依赖以及已构建的后端仓库。它在下载目录的 `anget-tmp` 内创建临时安装副本，使用独立端口和独立数据，验证真实 Electron 页面、认证、重启和退出清理，完成后自动删除临时目录。
 
-| 产物 | 说明 |
-|------|------|
-| `DeepSeek Harness-1.0.0-Setup.exe` | **安装程序**：中文向导、免管理员、桌面/开始菜单快捷方式、卸载程序 |
-| `DeepSeek Harness-1.1.1-Setup.exe` | **完整安装包**：支持选择目录、取消、快捷方式与卸载 |
+预览和正式安装包的构建流程见 [用户指南](docs/user-guide.md)。v1.2.1 的源码修改不代表已经发布新的 Setup 安装包。
 
-### 手动重新打包
+## 故障提示
 
-改过 `main.js` / `package.json` / 图标后，重新运行上面的脚本即可。
-图标：把 `assets/icon-512.png` 替换为你自己的 512x512 PNG，重新构建即可生效
-（窗口、托盘、快捷方式、安装器图标都会自动使用）。
+| 提示 | 处理方法 |
+|---|---|
+| 指定仓库不可用 | 修正 `DSH_REPO_ROOT` 或设置路径，选择含 `dsh` 启动脚本的源码仓库 |
+| Node.js / pnpm / npm / npx 不可用 | 安装对应工具并检查 PATH，重新启动桌面端 |
+| 依赖尚未安装 | 在提示的仓库目录运行 `pnpm install --frozen-lockfile` |
+| 构建产物缺失 | 在提示的仓库目录运行 `pnpm run build` |
+| 后端提前退出 | 按错误中的退出码和脱敏日志定位问题，无需等满 90 秒 |
+| 端口被占用且无法访问 | 完成原服务的登录，或自行关闭占用服务后重试 |
+| npx 首次安装超时 | 先在终端完成全局安装，再启动桌面端 |
 
----
-
-## ⚠️ 目标电脑使用前提（重要）
-
-本客户端**不内置 DSH 后端**，只是前端壳。目标电脑需满足以下任一条件：
-
-1. **已安装 DeepSeek Harness（dsh）环境** —— 应用会自动拉起本地后端；或
-2. **已安装 Node.js（>= 22）且可联网** —— 应用自动通过 `npx @deepseek-ai/dsh` 拉取后端；或
-3. **已有 DSH Web 服务运行在 3080 端口** —— 应用直接连接。
-
-不满足时，应用会弹出明确的中文错误提示（不会白屏卡死）。
-
----
-
-## 🔑 首次启动：配置 API Key
-
-应用启动后会自动检测模型密钥：
-
-- 已配置（`~/.dsh/.credentials.yaml` 或环境变量 `DEEPSEEK_API_KEY`）→ 跳过引导；
-- 未配置 → 弹出引导窗口，可填写 DeepSeek API Key 写入本机凭据文件，或选择"稍后配置"（在 DSH 界面「模型设置」中配置）。
-
----
-
-## ⌨️ 快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Ctrl+Shift+D` | 全局呼出/隐藏窗口 |
-| `Ctrl+N` | 新建对话 |
-| `Ctrl+,` | 打开设置 |
-| `Ctrl+Q` | 退出应用 |
-| `F11` | 全屏切换 |
-| 鼠标点击托盘图标 | 显示/隐藏窗口 |
-
----
-
-## 🔧 自定义配置
-
-编辑 `main.js` 文件：
-
-```javascript
-const DSH_URL = 'http://127.0.0.1:3080';  // 修改 DSH 地址
-const HOTKEY = 'CommandOrControl+Shift+D'; // 修改快捷键
-```
-
----
-
-## 📦 依赖说明（仅构建/开发机需要）
-
-- Node.js >= 22
-- npm / pnpm（项目依赖 electron 等）
-
-> 目标电脑不需要 Node 也可运行——只要满足上方"使用前提"之一。
-
----
-
-## 🐛 常见问题
-
-**Q: 启动后白屏？**
-A: 检查 `127.0.0.1:3080` 是否可访问；首次启动 DSH 服务可能需要 10-30 秒。
-
-**Q: 提示"未检测到 Node.js 环境"？**
-A: 目标电脑没有 Node.js 也没有 DSH 环境。安装 Node.js（>= 22）或到已装 DSH 的电脑上运行。
-
-**Q: 便携版解压到哪里了？**
-A: 在 Windows「已安装的应用」中卸载，或从开始菜单运行卸载程序。
-
-**Q: 如何卸载安装版？**
-A: 开始菜单 → "Uninstall DeepSeek Harness"，或 设置 → 应用 → DeepSeek Harness → 卸载。
+详细修复总结见 [启动修复说明](docs/startup-repair.md)。

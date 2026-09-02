@@ -7,7 +7,7 @@
  *
  * P0 验收：npm start 行为不变；日志落盘；内嵌窗无 nodeIntegration；node --test 可跑。
  */
-const { app, BrowserWindow, WebContentsView, Menu, globalShortcut, dialog, ipcMain, nativeTheme, Notification, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, globalShortcut, dialog, ipcMain, nativeTheme, Notification, shell, session, net } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -16,6 +16,7 @@ const os = require('os');
 const { createConfigStore } = require('./config');
 const { createLogger } = require('./logging');
 const { createDshServer } = require('./dsh-server');
+const { createSessionProbe } = require('./dsh-runtime');
 const { escapeHtml } = require('./lib/escape-html');
 const { compareSemver } = require('./lib/semver');
 const { createMainWindow: createMainWindowFactory, applyThemeToChrome, chromeColorsFor } = require('./window');
@@ -55,6 +56,7 @@ const configStore = createConfigStore({ userDataPath, fs, logger });
 const dshServer = createDshServer({
   projectRoot: PROJECT_ROOT,
   getDshConfig: getRuntimeConfig,
+  probeUrl: createSessionProbe(() => session.defaultSession, options => net.request(options)),
   logger
 });
 // P3 模块实例（B7 通知 / G1 本地 DSH 更新）
@@ -136,7 +138,7 @@ const LANG = {
 
   // 关于
   aboutTitle: '关于 DSH Desktop',
-  aboutVersion: '版本：1.2.0',
+  aboutVersion: '版本：1.2.1',
   aboutDescription: '类 ChatGPT 桌面客户端 - AI 助手',
   aboutAuthor: '作者：SmileSilence',
   aboutLicense: '许可证：MIT',
@@ -234,7 +236,7 @@ function loadLanguage(lang) {
       msgRestart: 'Restart',
       msgLater: 'Later',
       aboutTitle: 'About DSH Desktop',
-      aboutVersion: 'Version: 1.2.0',
+      aboutVersion: 'Version: 1.2.1',
       aboutDescription: 'ChatGPT-like Desktop Client - AI Assistant',
       aboutAuthor: 'Author: SmileSilence',
       aboutLicense: 'License: MIT',
@@ -774,7 +776,10 @@ function showSettings(activate = true) {
 
 // ============ DSH 安装状态检查（回显经 escapeHtml，D2） ============
 function showDshInstallationStatusHtml() {
-  const status = dshServer.detectFacts();
+  let status;
+  try { status = dshServer.detectFacts(); } catch (error) {
+    return escapeHtml(error.message).replace(/\n/g, '<br>');
+  }
 
   const lines = [];
   lines.push('DSH 安装状态检查：');
@@ -782,8 +787,10 @@ function showDshInstallationStatusHtml() {
   lines.push(status.repoPaths.length > 0
     ? `✅ 本地仓库：${status.repoPaths[0]}`
     : '❌ 未找到本地仓库');
-  lines.push(status.hasGlobalCli ? '✅ 全局 CLI 已安装' : '❌ 全局 CLI 未安装');
-  lines.push(status.npmGlobalPath ? `✅ npm 全局包：${status.npmGlobalPath}` : '❌ npm 全局包未安装');
+  if (status.repoPaths.length === 0) {
+    lines.push(status.hasGlobalCli ? '✅ 全局 CLI 已安装' : '❌ 全局 CLI 未安装');
+    lines.push(status.npmGlobalPath ? `✅ npm 全局包：${status.npmGlobalPath}` : '❌ npm 全局包未安装');
+  }
   lines.push('');
   lines.push('可用启动方式：');
   if (status.repoPaths.length > 0) lines.push('1. 从本地仓库启动（推荐）');
@@ -988,6 +995,7 @@ if (!gotLock) {
 // ============ 应用就绪 ============
 app.whenReady().then(async () => {
   configStore.load();
+  runtimeBackendPort = getConfig().dsh.port || 3080;
   applyNativeTheme();
   applyLoginItem(getConfig().tray.autoLaunch); // 同步外部修改的开机自启
   currentLang = loadLanguage(getConfig().language);
@@ -1023,8 +1031,8 @@ app.whenReady().then(async () => {
 
   try {
     // 直接复用 web profile：浏览器端已安装及以后安装的插件无需复制即可使用。
-    // Windows 可能将 3080 纳入系统排除端口；此时改用 3092 启动同一 web profile。
-    if (!(await dshServer.isServerReady())) {
+    // 仅复用当前浏览器会话可访问的服务，否则使用回退端口启动同一 profile。
+    if (runtimeBackendPort === 3080 && !(await dshServer.isServerReady())) {
       runtimeBackendPort = 3092;
       logger.log('web:3080 未运行或不可用，桌面端改用 web:3092');
     }
@@ -1032,26 +1040,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     logger.logError(`服务启动失败: ${err.message}`);
 
-    // 提供更详细的错误信息和解决方案
-    const errorDetail = [
-      'DSH Web 服务启动失败：',
-      err.message,
-      '',
-      '可能的原因：',
-      '1. DSH 仓库未找到 - 请设置环境变量 DSH_REPO_ROOT',
-      '2. 未安装 Node.js 或 pnpm',
-      '3. 网络问题（如果使用 npx 安装）',
-      '',
-      '解决方案：',
-      '1. 设置环境变量 DSH_REPO_ROOT 指向 DSH 仓库路径',
-      '2. 或将 DSH 仓库克隆到项目同级目录',
-      '3. 或全局安装 DSH: npm install -g @deepseek-ai/dsh',
-      '',
-      '示例：',
-      'set DSH_REPO_ROOT=C:\\path\\to\\deepseek-harness',
-      '或',
-      'npm install -g @deepseek-ai/dsh'
-    ].join('\n');
+    const errorDetail = `DSH Web 服务启动失败（${err.code || 'START_FAILED'}）：\n${err.message}`;
 
     await shellReadyPromise;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app-load-error', errorDetail);
@@ -1100,6 +1089,7 @@ app.on('window-all-closed', () => {
 let cleanupDone = false;
 let cleanupStarted = false;
 app.on('before-quit', (event) => {
+  isQuitting = true;
   if (cleanupDone) return;
   event.preventDefault();
   if (cleanupStarted) return;

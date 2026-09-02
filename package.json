@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "DeepSeek Harness 桌面客户端 - 类 ChatGPT 体验",
   "main": "main.js",
   "author": {
@@ -20,6 +20,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test \"tests/*.spec.mjs\"",
+    "test:startup": "node scripts/smoke-startup.cjs",
     "icons": "electron scripts/make-icons.mjs && node scripts/pack-ico.mjs",
     "build": "powershell -ExecutionPolicy Bypass -File scripts/build-preview.ps1",
     "build:win": "electron-builder --win",

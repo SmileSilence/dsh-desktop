@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)
 
@@ -86,13 +86,19 @@ npm run build
 >
 > 1. **已安装 DeepSeek Harness（dsh）环境** —— 直接使用，应用会自动拉起本地后端；或
 > 2. **已安装 Node.js（>= 22）且可联网** —— 应用会通过 `npx @deepseek-ai/dsh` 自动拉取后端；或
-> 浏览器使用的 `web:3080` 不会被桌面端复用、修改或停止。
+> 3. **已有可访问的 Web 服务** —— 桌面浏览器会话能通过认证时复用；退出桌面不会停止复用的外部服务。
 >
 > 不满足以上条件时，应用会给出明确的错误提示（不会白屏卡死）。
 
 **首次启动引导**：应用会检测模型 API Key。若 `~/.dsh/.credentials.yaml` 或环境变量
 `DEEPSEEK_API_KEY` 中未配置密钥，会弹出引导窗口，可填写 DeepSeek API Key 或选择稍后
 在 DSH 界面「模型设置」中配置。
+
+**v1.2.1 启动修复（源码版本，尚未发布）**：安装版能够从可执行文件所在目录探测相邻的 `deepseek-harness`，也支持任意位置的路径设置。`DSH_REPO_ROOT` 优先于设置；指定路径无效时直接提示，不转用 npx 下载。使用源码仓库前必须完成 `pnpm install --frozen-lockfile` 和 `pnpm run build`。
+
+新版 DSH 会输出带登录凭据的链接。桌面端通过自身浏览器会话交换 Cookie（登录状态），确认页面返回成功响应后再加载；401 不再被误判为就绪。默认尝试复用 3080，无法复用时使用 3092；显式配置其他端口时使用该端口。被占用且无法认证的端口会明确报错。
+
+首次 npx 下载可能超过 90 秒。超时后请在终端完成 `npm install -g @deepseek-ai/dsh` 再重试；桌面端不会无限等待。详细操作见 [快速开始](QUICKSTART.md)，本次故障总结和验证方式见 [启动修复说明](docs/startup-repair.md)。
 
 ---
 
@@ -153,7 +159,7 @@ dsh-desktop/
 ├── LICENSE              # 开源协议
 ├── assets/              # 资源文件（图标等）
 └── dist/                # 打包输出
-    └── DeepSeek Harness-1.2.0-Setup.exe
+    └── DeepSeek Harness-1.2.1-Setup.exe
 ```
 
 ---
@@ -252,11 +258,12 @@ npm run dev
 
 ### 问题：启动后白屏
 
-**原因**：DSH Web 服务未运行
+**原因**：后端未就绪、构建产物缺失，或桌面会话尚未通过后端认证。
 
 **解决**：
-1. 确保 DSH 服务已启动：`http://127.0.0.1:3080`
-2. 或修改 `main.js` 中的 `DSH_URL` 地址
+1. 按启动页显示的具体原因修正路径、依赖、构建产物或端口。
+2. 已有服务返回 401 时需要通过正式登录链接认证；直接打开根地址不能完成登录。
+3. 源码启动方式和错误分类见 [快速开始](QUICKSTART.md)，无需修改源码中的地址常量。
 
 ### 问题：快捷键不生效
 
@@ -295,6 +302,14 @@ npm run build:win
 ---
 
 ## 📝 更新日志
+
+### v1.2.1（源码版本，尚未发布）
+
+- 修复安装目录仓库探测、显式路径校验及缺依赖/缺构建产物提示。
+- 支持新版 DSH 登录链接和浏览器 Cookie，严格检查响应状态，按完整行隐藏凭据。
+- 后端提前退出立即报错；超时、停止和重启取消旧轮询并清理自建进程树。
+- 合并并发启动和重启；桥接重启接口等待实际结果；尊重设置中的非默认端口。
+- 增加启动生命周期测试及使用独立用户数据、后端数据和端口的安装包冒烟验证。
 
 ### v1.2.0 (2026-09-02)
 

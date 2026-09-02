@@ -486,17 +486,23 @@ darwin: { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 15, y: 15 } }
 
 ```
 resolveLaunch(config.dsh):
-  1) config.dsh.path 且存在 package.json  → { cmd:'pnpm', args:['dsh','web','--no-open', '--port', port], cwd }
-  2) DSH_REPO_ROOT / 同级 / 家目录 / 桌面 / 文档 下 deepseek-harness/package.json
+  1) DSH_REPO_ROOT 覆盖 config.dsh.path，规范化后的显式路径必须包含 package.json 和 scripts.dsh
+  2) 可执行文件相邻/内部、开发项目相邻/内部、家目录/桌面/文档下的 deepseek-harness；规范化去重
   3) 全局 CLI 可用（dsh --version）          → { cmd:'dsh', args:[...], cwd:null }
   4) npm root -g 含 @deepseek-ai/dsh       → { cmd:'npx', args:['@deepseek-ai/dsh', ...] }
   5) npx 兜底
 参数追加：--profile（config.dsh.profile）、--proxy、env 合并 config.dsh.env。
-前置检查：依赖系统 Node 的路径（2–5）且系统无 node → 提前报错（沿用现错误文案）。
-启动：spawn(windowsHide:true, shell:true, stdio:['ignore','pipe','pipe'])，尾部 2KB 缓冲。
-就绪：TCP 探测端口 → HTTP /healthz（status<500）→ 超时 90s。
-失败：写日志 + 收尾 stderr → diagnostics.export()。
+前置检查：Node 和选定启动工具可用；源码入口、tsx 依赖和 CLI/Web 构建产物存在；工具探测上限 5 秒。
+启动：spawn(windowsHide:true, shell:true, stdio:['ignore','pipe','pipe'])；按 UTF-8 完整行脱敏后保留尾部 2KB。
+就绪：TCP 探测端口 → 页面浏览器会话访问根地址或登录链接 → 同源跳转后的最终 2xx → 超时 90s。
+失败：区分前置检查、启动错误、提前退出、端口占用、超时、取消；显示脱敏后的实际原因。
 ```
+
+`dsh-runtime.js` 提供完整行解析、凭据脱敏、正式登录链接解析、浏览器会话探测和进程树终止。主入口向服务工厂注入 `session.defaultSession` 与 `net.request`；逐跳检查同源地址再调用 `followRedirect()`，取得 Cookie 后最终 2xx 才视为就绪。采用 ClientRequest 是因为当前 Electron 的 `fetch(..., {redirect:'manual'})` 会拒绝重定向；接口语义见 [Electron ClientRequest 文档](https://www.electronjs.org/docs/latest/api/client-request/)。
+
+`dshUrl()` 与 `status().url` 始终返回无凭据的基础地址。登录链接仅留在本次启动内存中，认证成功、退出、取消时清除；错误、日志和诊断只能读取完整行脱敏后的内容。401/403/404/5xx 不算成功。默认 3080 无法复用时回退 3092；显式其他端口直接使用，无法认证的占用端口不重新启动子进程。
+
+启动、停止和重启各自合并并发请求。一次启动持有取消控制器、进程引用和独立输出缓冲，旧轮次事件不能修改新状态。停止或失败取消 HTTP 请求及计时器，并在 Windows 结束持有 PID 的进程树；清理失败阻止再次启动。复用的外部服务没有进程所有权，因此退出时不终止。桥接重启接口必须等待该异步操作完成。
 
 ### 15.5 配置 schema 与校验规格（E1）
 

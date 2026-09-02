@@ -22,6 +22,16 @@ function makeRoutes(overrides = {}) {
   return createRoutes(services);
 }
 
+test('后端重启接口等待实际结果并捕获异步失败', async () => {
+  let complete;
+  const request = makeRoutes({ restartBackend: () => new Promise(resolve => { complete = resolve; }) })({ method: 'POST', pathname: '/api/backend/restart' });
+  complete({ started: true, port: 3092 });
+  assert.deepEqual((await request).json.data, { started: true, port: 3092 });
+  const failed = await makeRoutes({ restartBackend: async () => { throw new Error('启动超时'); } })({ method: 'POST', pathname: '/api/backend/restart' });
+  assert.equal(failed.status, 500);
+  assert.equal(failed.json.code, 'RESTART_FAILED');
+});
+
 // ============ 端点分发 ============
 test('GET /healthz', async () => {
   const r = await makeRoutes()({ method: 'GET', pathname: '/healthz', body: {} });
