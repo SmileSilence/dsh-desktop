@@ -4,6 +4,7 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!include "FileFunc.nsh"
 !include "version.nsh"
 
 Name "DeepSeek Harness"
@@ -29,6 +30,9 @@ Var DshRadioSource
 Var HasNode
 Var HasGit
 Var DshRepoPath
+; 更新模式：0=正常安装 1=/UPDATE 静默覆盖 2=/ROLLBACK 回滚
+Var UpdateMode
+Var RollbackBackupDir
 ; ---- 卸载器：DSH 组件清理选项 ----
 Var DshInstallMode
 Var UserProfile
@@ -62,7 +66,28 @@ UninstPage custom un.UnDshPageCreate un.UnDshPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
+; 检测 /UPDATE 静默覆盖参数（桌面端自动更新）
+Function .onInit
+  ${GetOptions} $CMDLINE "/ROLLBACK" $0
+  ${IfNot} ${Errors}
+    StrCpy $UpdateMode 2
+    SetSilent silent
+    Return
+  ${EndIf}
+  ${GetOptions} $CMDLINE "/UPDATE" $0
+  ${If} ${Errors}
+    StrCpy $UpdateMode 0
+  ${Else}
+    StrCpy $UpdateMode 1
+    SetSilent silent
+  ${EndIf}
+FunctionEnd
+
 Function DshPageCreate
+  ${If} $UpdateMode = 1
+  ${OrIf} $UpdateMode = 2
+    Abort
+  ${EndIf}
   !insertmacro MUI_HEADER_TEXT "安装 DSH 后端" "选择 DSH 的安装方式（可稍后在应用设置中调整）"
   nsDialogs::Create 1018
   Pop $0
@@ -211,6 +236,33 @@ FunctionEnd
 
 Section "DeepSeek Harness" SEC_MAIN
   SetShellVarContext current
+
+  ; ---- 更新/回滚模式：先结束运行中的主进程，避免其锁定安装目录 ----
+  ${If} $UpdateMode = 1
+  ${OrIf} $UpdateMode = 2
+    nsExec::ExecToLog 'taskkill /F /IM "DeepSeek Harness.exe"'
+    Sleep 800
+  ${EndIf}
+
+  ; ---- 更新模式：备份旧安装目录到 <installDir>.backup（覆盖前） ----
+  ${If} $UpdateMode = 1
+    StrCpy $RollbackBackupDir "$INSTDIR.backup"
+    RMDir /r "$RollbackBackupDir"
+    Rename "$INSTDIR" "$RollbackBackupDir"
+  ${EndIf}
+
+  ; ---- 回滚模式：删除失败的新版本目录，从 <installDir>.backup 恢复旧版 ----
+  ${If} $UpdateMode = 2
+    StrCpy $RollbackBackupDir "$INSTDIR.backup"
+    IfFileExists "$RollbackBackupDir" 0 rollback_nobackup
+    RMDir /r "$INSTDIR"
+    Rename "$RollbackBackupDir" "$INSTDIR"
+    Goto rollback_done
+  rollback_nobackup:
+    ; 无备份时仍继续覆盖安装（退化为正常安装）
+  rollback_done:
+  ${EndIf}
+
   SetOutPath "$INSTDIR"
   File /r "dist\DeepSeek Harness-win32-x64\*.*"
   FileOpen $0 "$INSTDIR\.dsh-desktop-install" w
@@ -228,21 +280,35 @@ Section "DeepSeek Harness" SEC_MAIN
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoRepair" 1
   WriteRegStr HKCU "Software\DeepSeek Harness" "InstallDir" "$INSTDIR"
-  ; 记录本次选择的 DSH 安装方式（0=跳过 1=全局 2=源码），供卸载器完整清理
-  WriteRegDWORD HKCU "Software\DeepSeek Harness" "DshInstallMode" $DshChoice
+  ; 记录本次选择的 DSH 安装方式（0=跳过 1=全局 2=源码），供卸载器完整清理。
+  ; 更新模式不写该值，保留用户原有的后端安装方式记录。
+  ${If} $UpdateMode = 0
+    WriteRegDWORD HKCU "Software\DeepSeek Harness" "DshInstallMode" $DshChoice
+  ${EndIf}
 
-  CreateShortCut "$DESKTOP\DeepSeek Harness.lnk" "$INSTDIR\DeepSeek Harness.exe" "" "$INSTDIR\DeepSeek Harness.exe" 0
-  !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
-    CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
-    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\DeepSeek Harness.lnk" "$INSTDIR\DeepSeek Harness.exe" "" "$INSTDIR\DeepSeek Harness.exe" 0
-    CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Uninstall DeepSeek Harness.lnk" "$INSTDIR\Uninstall.exe"
-  !insertmacro MUI_STARTMENU_WRITE_END
+  ; 快捷方式仅在正常安装时创建（更新模式已存在，且 STARTMENU 页静默跳过会留空 $StartMenuFolder）
+  ${If} $UpdateMode = 0
+    CreateShortCut "$DESKTOP\DeepSeek Harness.lnk" "$INSTDIR\DeepSeek Harness.exe" "" "$INSTDIR\DeepSeek Harness.exe" 0
+    !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+      CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+      CreateShortCut "$SMPROGRAMS\$StartMenuFolder\DeepSeek Harness.lnk" "$INSTDIR\DeepSeek Harness.exe" "" "$INSTDIR\DeepSeek Harness.exe" 0
+      CreateShortCut "$SMPROGRAMS\$StartMenuFolder\Uninstall DeepSeek Harness.lnk" "$INSTDIR\Uninstall.exe"
+    !insertmacro MUI_STARTMENU_WRITE_END
+  ${EndIf}
 
-  ; ---- 按用户选择安装 DSH 后端 ----
-  ${If} $DshChoice = 1
-    Call InstallDshGlobal
-  ${ElseIf} $DshChoice = 2
-    Call InstallDshSource
+  ; ---- 按用户选择安装 DSH 后端（更新模式跳过，保留既有后端） ----
+  ${If} $UpdateMode = 0
+    ${If} $DshChoice = 1
+      Call InstallDshGlobal
+    ${ElseIf} $DshChoice = 2
+      Call InstallDshSource
+    ${EndIf}
+  ${EndIf}
+
+  ; ---- 更新/回滚模式：安装完成后自动启动应用 ----
+  ${If} $UpdateMode = 1
+  ${OrIf} $UpdateMode = 2
+    Exec '"$INSTDIR\DeepSeek Harness.exe"'
   ${EndIf}
 SectionEnd
 

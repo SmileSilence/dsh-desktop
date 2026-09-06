@@ -22,6 +22,7 @@ test('DEFAULTS 形状符合 §15.5 schema', () => {
   assert.equal(DEFAULTS.dsh.checkOnStartup, false);
   assert.equal(DEFAULTS.bridge.token, '');
   assert.equal(DEFAULTS.updater.channel, 'stable');
+  assert.equal(DEFAULTS.updater.checkOnStartup, false);
   assert.equal(DEFAULTS.language, 'zh-CN');
 });
 

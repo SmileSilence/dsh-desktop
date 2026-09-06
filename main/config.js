@@ -30,7 +30,7 @@ const DEFAULTS = {
   },
   integration: { mode: 'shared-web' },
   bridge: { port: 0, token: '' }, // 运行时生成，不入用户编辑面（D3）
-  updater: { lastChecked: null, channel: 'stable' },
+  updater: { lastChecked: null, channel: 'stable', checkOnStartup: false },
   language: 'zh-CN'
 };
 
@@ -193,6 +193,7 @@ function validateConfig(cfg) {
   const u = cfg.updater || {};
   check('updater.lastChecked', u.lastChecked === null || typeof u.lastChecked === 'number', 'updater.lastChecked 必须为数字或 null');
   check('updater.channel', u.channel === 'stable', "updater.channel 目前仅支持 'stable'");
+  check('updater.checkOnStartup', typeof u.checkOnStartup === 'boolean', 'updater.checkOnStartup 必须为布尔值');
 
   return { ok: errors.length === 0, errors };
 }

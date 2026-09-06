@@ -41,7 +41,16 @@ function fetchLatestRelease(target, opts = {}) {
         }
         try {
           const json = JSON.parse(data);
-          resolve({ version: json.tag_name || null, url: json.html_url || null });
+          resolve({
+            version: json.tag_name || null,
+            url: json.html_url || null,
+            assets: (json.assets || []).map((a) => ({
+              name: a.name,
+              browser_download_url: a.browser_download_url,
+              digest: a.digest || null,
+              size: a.size || null
+            }))
+          });
         } catch (e) {
           resolve({ version: null, url: null, error: '响应解析失败', errorCode: 'INVALID_RESPONSE' });
         }
@@ -82,13 +91,13 @@ async function checkForUpdate(deps) {
   }
 
   const repo = getRepository();
-  const { version: latest, url, error, errorCode } = await fetch(repo);
+  const { version: latest, url, assets, error, errorCode } = await fetch(repo);
   logger.log?.(`更新检查完成: latest=${latest ?? 'unknown'}${error ? ` (${error})` : ''}`);
 
   if (latest === null) {
     return {
       hasUpdate: false, current: getCurrentVersion(), latest: null, url: null,
-      error: error || '未获取到版本', errorCode: errorCode || 'NO_VERSION',
+      assets: assets || [], error: error || '未获取到版本', errorCode: errorCode || 'NO_VERSION',
       note: error ? `检查失败: ${error}` : '未获取到版本'
     };
   }
@@ -117,9 +126,9 @@ async function checkForUpdate(deps) {
   }
 
   if (compare !== null && comparison === null) {
-    return { hasUpdate: false, current: getCurrentVersion(), latest, url, error: '版本格式无法识别', errorCode: 'INVALID_VERSION' };
+    return { hasUpdate: false, current: getCurrentVersion(), latest, url, assets: assets || [], error: '版本格式无法识别', errorCode: 'INVALID_VERSION' };
   }
-  return { hasUpdate, current: getCurrentVersion(), latest, url };
+  return { hasUpdate, current: getCurrentVersion(), latest, url, assets: assets || [] };
 }
 
 module.exports = { checkForUpdate, fetchLatestRelease, THROTTLE_MS };

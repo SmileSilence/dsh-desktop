@@ -30,6 +30,10 @@ const { buildDiagnostics } = require('./diagnostics');
 const { createDshUpdate } = require('./dsh-update');
 const { createTabManager } = require('./tab-manager');
 const { detectSuspectPlugins, failureLogName, readBundles, writeBundles, disableBundles, disableAllThirdParty } = require('./plugin-recovery');
+const { createAppUpdater, backupDirFor } = require('./app-updater');
+const https = require('https');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const HOTKEY = 'CommandOrControl+Shift+D';
@@ -130,6 +134,8 @@ const LANG = {
   appUpdatePrompt: '点击“检查桌面版更新”获取 GitHub 最新正式版本。',
   appUpdateCheck: '检查桌面版更新',
   appUpdateOpenDownload: '打开下载页',
+  appUpdateInstall: '下载并安装',
+  appUpdateInstalling: '正在下载并准备安装，应用即将退出并自动重启…',
   appUpdateChecking: '正在检查 DSH Desktop 更新…',
   appUpdateAvailable: '发现可用更新',
   appUpdateCurrent: '已是最新版本或当前版本更新',
@@ -266,6 +272,8 @@ function loadLanguage(lang) {
       appUpdatePrompt: 'Check the latest stable GitHub Release for DSH Desktop.',
       appUpdateCheck: 'Check Desktop Update',
       appUpdateOpenDownload: 'Open Download Page',
+      appUpdateInstall: 'Download & Install',
+      appUpdateInstalling: 'Downloading and preparing to install. The app will quit and restart automatically…',
       appUpdateChecking: 'Checking for DSH Desktop updates…',
       appUpdateAvailable: 'Update available',
       appUpdateCurrent: 'Up to date or newer than the latest release',
@@ -483,6 +491,147 @@ function restartAppAndBackend() {
 /** 安装目录（打包态 = exe 所在目录；开发态 = 项目根）。完整启动日志归档于此目录下的 log 文件夹。 */
 function installDir() {
   return app.isPackaged ? path.dirname(process.execPath) : PROJECT_ROOT;
+}
+
+// ============ 桌面端自动覆盖更新（覆盖自动安装） ============
+
+/** 下载文件（跟随 GitHub 302 重定向），返回 Promise。 */
+function downloadSetup(url, dest) {
+  return new Promise((resolve, reject) => {
+    const fail = (e) => reject(e);
+    req(url, dest, fail, resolve, 0);
+  });
+}
+
+function req(url, dest, fail, done, redirects) {
+  https.get(url, { headers: { 'User-Agent': 'dsh-desktop-updater' } }, (res) => {
+    if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+      const loc = res.headers.location;
+      res.resume();
+      if (!loc || redirects >= 5) { fail(new Error(`下载重定向失败（${res.statusCode}）`)); return; }
+      return req(new URL(loc, url).href, dest, fail, done, redirects + 1);
+    }
+    if (res.statusCode !== 200) { res.resume(); fail(new Error(`下载失败 HTTP ${res.statusCode}`)); return; }
+    const out = fs.createWriteStream(dest);
+    res.pipe(out);
+    out.on('finish', () => { out.close(); done(); });
+    out.on('error', (e) => { res.destroy(); fail(e); });
+    res.on('error', fail);
+  }).on('error', fail);
+}
+
+/** 计算文件 SHA-256（小写 hex）。 */
+function sha256File(file) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(file);
+    stream.on('data', (d) => hash.update(d));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+/** 以静默模式启动安装器（/UPDATE 覆盖 或 /ROLLBACK 回滚），随后退出当前应用。 */
+function relaunchInstaller(exePath, mode) {
+  const args = mode === 'rollback' ? ['/ROLLBACK'] : ['/UPDATE'];
+  logger.log(`启动安装器 ${mode} 模式: ${exePath} ${args.join(' ')}`);
+  const child = spawn(exePath, args, { detached: true, stdio: 'ignore' });
+  child.unref();
+  isQuitting = true;
+  setTimeout(() => app.exit(0), 800);
+}
+
+/** 临时下载目录（用户数据目录下 updates/）。 */
+function updateDownloadDir() {
+  return path.join(app.getPath('userData'), 'updates');
+}
+
+/** app-updater 实例（检查+下载+校验）。 */
+const appUpdater = createAppUpdater({
+  getCurrentVersion: () => app.getVersion(),
+  getInstallDir: () => installDir(),
+  compare: compareSemver,
+  fetch: () => checkForUpdate({
+    getCurrentVersion: () => app.getVersion(),
+    getRepository: repositoryTarget,
+    getLastChecked: () => getConfig().updater.lastChecked,
+    setLastChecked: (ts) => { try { configStore.set({ updater: { lastChecked: ts } }); } catch { /* 忽略 */ } },
+    compare: compareSemver,
+    force: true,
+    logger
+  }),
+  downloadFile: downloadSetup,
+  sha256File,
+  path,
+  logger
+});
+
+/**
+ * 执行完整覆盖更新（下载→校验→备份交给安装器→退出）。
+ * 由关于页 / 启动静默检查调用；带 confirm 时弹确认框。
+ */
+async function performAppUpdate() {
+  const dir = updateDownloadDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const check = await appUpdater.check();
+  if (!check.hasUpdate) return { ok: false, message: check.errorCode ? check.error || '检查失败' : '已是最新版本' };
+  if (!check.hasAsset) return { ok: false, message: '未找到可用的安装包资产' };
+
+  const { file, sha256 } = await appUpdater.downloadAndVerify(check.asset, dir);
+  logger.log(`安装包已下载并校验: ${file}`);
+
+  // 清理旧安装包（保留本次）
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f !== path.basename(file) && /\.exe$/i.test(f)) fs.rmSync(path.join(dir, f), { force: true });
+    }
+  } catch { /* 忽略清理失败 */ }
+
+  notifier.notify({ title: '正在更新 DSH Desktop', body: `即将退出并静默安装 v${check.latest}，完成后自动重启。` });
+  relaunchInstaller(file, 'update');
+  return { ok: true, sha256 };
+}
+
+/** 更新后启动验证：存在 .backup 说明是刚完成的覆盖更新，后端健康则清理，否则回滚。 */
+function verifyPostUpdateAndCleanup() {
+  const backup = backupDirFor(installDir());
+  if (!fs.existsSync(backup)) return; // 非更新启动
+  logger.log('检测到更新备份，验证新版健康状态...');
+  // 给后端一点启动时间，随后按状态决定清理或回滚
+  setTimeout(async () => {
+    try {
+      const ready = dshServer.status().ready || dshServer.status().running;
+      const service = await dshServer.hasDshService().catch(() => false);
+      if (ready || service) {
+        logger.log('新版运行正常，删除旧版本备份与安装包。');
+        fs.rmSync(backup, { recursive: true, force: true });
+        try {
+          const dir = updateDownloadDir();
+          if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+        } catch { /* 忽略 */ }
+      } else {
+        logger.log('新版后端未就绪，自动回滚到旧版本。');
+        // 用下载的安装器执行 /ROLLBACK（安装器支持从 .backup 恢复旧版）
+        const updDir = updateDownloadDir();
+        let rollbackExe = null;
+        try {
+          rollbackExe = fs.readdirSync(updDir).find((f) => /\.exe$/i.test(f));
+          if (rollbackExe) rollbackExe = path.join(updDir, rollbackExe);
+        } catch { /* 忽略 */ }
+        if (rollbackExe) relaunchInstaller(rollbackExe, 'rollback');
+        else logger.logError('回滚失败：未找到安装器，请手动重新安装旧版本。');
+      }
+    } catch (e) {
+      logger.logError(`更新后验证失败: ${e.message}`);
+    }
+  }, 8000);
+}
+
+/** 提取 repository target（复用 checkAppUpdate 的解析）。 */
+function repositoryTarget() {
+  const repo = (require('../package.json').repository) || { type: 'git', url: 'https://github.com/SmileSilence/dsh-desktop.git' };
+  const m = /(?:github\.com|gitee\.com)[/:]([^/]+)\/([^/]+?)(?:\.git)?$/.exec(repo.url || '');
+  return m ? { owner: m[1], repo: m[2].replace(/\.git$/, '') } : { owner: 'SmileSilence', repo: 'dsh-desktop' };
 }
 
 /** DSH web profile 的 package.json 路径（~/.dsh/profiles/web/package.json）。 */
@@ -1186,6 +1335,23 @@ ipcMain.handle('internal-app-check-update', async (event) => {
   return checkAppUpdate(true);
 });
 
+// 覆盖自动安装：下载→校验→退出→安装器 /UPDATE（由 performAppUpdate 编排）
+ipcMain.handle('app-install-update', async (event) => {
+  if (!isInternalPageSender(event)) throw new Error('仅允许内置页面执行更新安装');
+  const confirmed = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: [currentLang.btnOk, currentLang.btnCancel],
+    title: currentLang.appName,
+    message: '确定下载并安装新版本吗？\n应用将自动退出、静默覆盖安装，完成后自动重启。'
+  });
+  if (confirmed !== 0) return { ok: false, message: '已取消' };
+  try {
+    return await performAppUpdate();
+  } catch (err) {
+    return { ok: false, message: escapeHtml(err.message) };
+  }
+});
+
 ipcMain.handle('internal-dsh-update', async (event, confirm) => {
   if (!isInternalPageSender(event)) throw new Error('仅允许内置页面更新 DSH');
   const result = await dshUpdate.update(confirm === true);
@@ -1362,6 +1528,20 @@ app.whenReady().then(async () => {
 
   // 首次启动引导：未配置模型 API Key 时弹出引导窗口
   if (!needsDshLogin) ensureApiKeyGuide();
+
+  // 覆盖更新后的启动验证：健康则清理备份，否则回滚（仅在打包态启用）
+  if (app.isPackaged) verifyPostUpdateAndCleanup();
+
+  // 桌面版启动静默检查（updater.checkOnStartup，默认关）：发现新版仅弹通知，不自动安装
+  if (getConfig().updater.checkOnStartup) {
+    setTimeout(() => {
+      appUpdater.check().then((r) => {
+        if (r.hasUpdate && r.hasAsset) {
+          notifier.notify({ title: 'DSH Desktop 有新版本', body: `当前 ${r.current} → 最新 ${r.latest}，可到「关于」页点击更新。` });
+        }
+      }).catch((e) => logger.logError(`启动静默检查失败: ${e.message}`));
+    }, 15000);
+  }
 
   // G1：启动时按 dsh.checkOnStartup 静默检查本地 DSH 更新（默认关，发现新版仅发通知，不自动更新）
   if (getConfig().dsh.checkOnStartup) {

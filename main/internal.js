@@ -247,17 +247,24 @@ function renderAbout(data) {
   const appDownloadButton = el('button', lang.appUpdateOpenDownload, 'button secondary');
   appDownloadButton.id = 'appUpdateDownload';
   appDownloadButton.disabled = true;
+  const appInstallButton = el('button', lang.appUpdateInstall, 'button');
+  appInstallButton.id = 'appUpdateInstall';
+  appInstallButton.disabled = true;
   let appReleaseUrl = null;
+  let appHasUpdate = false;
   appCheckButton.onclick = async () => {
     appCheckButton.disabled = true;
     appDownloadButton.disabled = true;
+    appInstallButton.disabled = true;
     appVersionStatus.textContent = lang.appUpdateChecking;
     try {
       const result = await api.checkAppUpdate();
       const view = window.dshUpdateView.formatAppUpdate(result, lang);
       appVersionStatus.textContent = view.text;
       appReleaseUrl = view.canOpen ? result.url : null;
+      appHasUpdate = result.hasUpdate === true;
       appDownloadButton.disabled = !view.canOpen;
+      appInstallButton.disabled = !appHasUpdate;
     } catch (error) {
       appVersionStatus.textContent = `${lang.appUpdateFailed}: ${error.message}`;
     } finally {
@@ -267,7 +274,19 @@ function renderAbout(data) {
   appDownloadButton.onclick = () => {
     if (appReleaseUrl) api.openExternal(appReleaseUrl);
   };
-  appUpdateActions.append(appCheckButton, appDownloadButton);
+  appInstallButton.onclick = async () => {
+    appInstallButton.disabled = true;
+    appVersionStatus.textContent = lang.appUpdateInstalling;
+    try {
+      const result = await api.installAppUpdate();
+      appVersionStatus.textContent = result.ok ? lang.appUpdateInstalling : `${lang.appUpdateFailed}: ${result.message}`;
+      if (!result.ok) appInstallButton.disabled = false;
+    } catch (error) {
+      appVersionStatus.textContent = `${lang.appUpdateFailed}: ${error.message}`;
+      appInstallButton.disabled = false;
+    }
+  };
+  appUpdateActions.append(appCheckButton, appDownloadButton, appInstallButton);
   appUpdateCard.append(appVersionStatus, appUpdateActions);
 
   const updateCard = el('section', null, 'section');

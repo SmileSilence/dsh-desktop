@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   onDshStatusUpdated: (cb) => { ipcRenderer.on('dsh-status-updated', (e, status) => cb(status)); },
   getInternalPageData: () => ipcRenderer.invoke('internal-page-data'),
   checkAppUpdate: () => ipcRenderer.invoke('internal-app-check-update'),
+  installAppUpdate: () => ipcRenderer.invoke('app-install-update'),
   checkDshUpdate: () => ipcRenderer.invoke('internal-dsh-check-update'),
   updateDsh: (confirm) => ipcRenderer.invoke('internal-dsh-update', confirm === true),
   confirm: (message) => ipcRenderer.invoke('internal-confirm', message),
