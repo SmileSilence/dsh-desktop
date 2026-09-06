@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   // DSH Web 登录引导窗
   loginDsh: (url) => ipcRenderer.invoke('dsh-login', url),
 
+  // 插件启动故障恢复：禁用疑似插件（null=全部第三方）并重启后端
+  disablePluginsAndRestart: (names) => ipcRenderer.invoke('disable-plugins-and-restart', names),
+
   // 设置窗（fallback）
   saveSettings: (cfg) => ipcRenderer.send('save-settings', cfg),
   refreshDshStatus: () => ipcRenderer.send('refresh-dsh-status'),

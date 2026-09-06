@@ -163,12 +163,6 @@ function renderSettings(data) {
   });
   language.append(settingRow(lang.settingsLanguage, select));
 
-  const hotkey = section(lang.settingsHotkey);
-  hotkey.append(hotkeySettingRow(lang.hotkeyToggle, 'hotkey', cfg.hotkey, lang.hotkeyNotSet));
-  hotkey.append(hotkeySettingRow(lang.hotkeySettings, 'hotkeySettings', cfg.hotkeySettings, lang.hotkeyNotSet));
-  hotkey.append(hotkeySettingRow(lang.hotkeyAbout, 'hotkeyAbout', cfg.hotkeyAbout, lang.hotkeyNotSet));
-  hotkey.append(hotkeySettingRow(lang.hotkeyRestartBackend, 'hotkeyRestartBackend', cfg.hotkeyRestartBackend, lang.hotkeyNotSet));
-  hotkey.append(hotkeySettingRow(lang.hotkeyNewTab, 'hotkeyNewTab', cfg.hotkeyNewTab, lang.hotkeyNotSet));
   const dsh = section(lang.settingsDshPath);
   const pathInput = el('input', null, 'text-input'); pathInput.id = 'dshPath'; pathInput.value = cfg.dsh.path || ''; pathInput.placeholder = lang.dshPathPlaceholder;
   dsh.append(settingRow(lang.dshPathLabel, pathInput));
@@ -181,13 +175,52 @@ function renderSettings(data) {
   const save = el('button', lang.btnApply, 'button'); save.type = 'button';
   const saved = el('span', '', 'saved'); saved.id = 'saveState';
   save.onclick = () => {
-    api.saveSettings({tray:{autoLaunch:document.getElementById('autoLaunch').checked,closeToTray:document.getElementById('closeToTray').checked,topMost:document.getElementById('topMost').checked},window:{tabPosition:tabPosSelect.value},appearance:{brandTitle:brandTitleInput.value.trim()},hotkey:document.getElementById('hotkey').value,hotkeySettings:document.getElementById('hotkeySettings').value,hotkeyAbout:document.getElementById('hotkeyAbout').value,hotkeyRestartBackend:document.getElementById('hotkeyRestartBackend').value,hotkeyNewTab:document.getElementById('hotkeyNewTab').value,language:select.value,dsh:{path:pathInput.value}});
+    api.saveSettings({tray:{autoLaunch:document.getElementById('autoLaunch').checked,closeToTray:document.getElementById('closeToTray').checked,topMost:document.getElementById('topMost').checked},window:{tabPosition:tabPosSelect.value},appearance:{brandTitle:brandTitleInput.value.trim()},language:select.value,dsh:{path:pathInput.value}});
     saved.textContent = '已保存';
   };
   actions.append(refresh, save, saved);
   headerInner.append(actions);
-  appRoot.append(header, el('div', null, 'settings-header-spacer'), general, appearance, language, hotkey, dsh);
+  appRoot.append(header, el('div', null, 'settings-header-spacer'), general, appearance, language, dsh);
   api.onDshStatusUpdated((html) => { status.innerHTML = html; });
+}
+
+/** 快捷键独立页签（需求M4）：只列出全局热键，独立保存。 */
+function renderHotkeys(data) {
+  const { config: cfg, language: lang } = data;
+  const header = el('div', null, 'settings-header');
+  const headerInner = el('div', null, 'settings-header-inner');
+  header.append(headerInner);
+  headerInner.append(el('h1', lang.settingsHotkey));
+
+  const hotkey = section(lang.settingsHotkey);
+  const fields = [
+    [lang.hotkeyToggle, 'hotkey'],
+    [lang.hotkeySettings, 'hotkeySettings'],
+    [lang.hotkeyAbout, 'hotkeyAbout'],
+    [lang.hotkeyRestartBackend, 'hotkeyRestartBackend'],
+    [lang.hotkeyRestartApp, 'hotkeyRestartApp'],
+    [lang.hotkeyDevTools, 'hotkeyDevTools'],
+    [lang.hotkeyNewTab, 'hotkeyNewTab']
+  ];
+  const inputs = {};
+  for (const [label, id] of fields) {
+    const value = cfg[id] || '';
+    const row = hotkeySettingRow(label, id, value, lang.hotkeyNotSet);
+    inputs[id] = row.querySelector('#' + id);
+    hotkey.append(row);
+  }
+
+  const actions = el('div', null, 'actions');
+  const save = el('button', lang.btnApply, 'button'); save.type = 'button';
+  const saved = el('span', '', 'saved'); saved.id = 'saveState';
+  save.onclick = () => {
+    const patch = { hotkey: inputs.hotkey.value, hotkeySettings: inputs.hotkeySettings.value, hotkeyAbout: inputs.hotkeyAbout.value, hotkeyRestartBackend: inputs.hotkeyRestartBackend.value, hotkeyRestartApp: inputs.hotkeyRestartApp.value, hotkeyDevTools: inputs.hotkeyDevTools.value, hotkeyNewTab: inputs.hotkeyNewTab.value };
+    api.saveSettings(patch);
+    saved.textContent = '已保存';
+  };
+  actions.append(save, saved);
+  headerInner.append(actions);
+  appRoot.append(header, el('div', null, 'settings-header-spacer'), hotkey);
 }
 
 function renderAbout(data) {
@@ -281,5 +314,7 @@ function renderAbout(data) {
 api.getInternalPageData().then((data) => {
   document.documentElement.dataset.theme = data.theme;
   const view = new URLSearchParams(location.search).get('view');
-  if (view === 'about') renderAbout(data); else renderSettings(data);
+  if (view === 'about') renderAbout(data);
+  else if (view === 'hotkeys') renderHotkeys(data);
+  else renderSettings(data);
 }).catch((error) => { appRoot.textContent = `页面加载失败：${error.message}`; });

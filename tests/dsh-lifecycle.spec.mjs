@@ -62,6 +62,22 @@ function fixture(options = {}) {
       if (command.startsWith('dsh ') || options.missingTools?.includes(command.split(' ')[0])) throw new Error('not installed');
       return command === 'npm root -g' ? 'C:\\npm' : '1.0.0';
     },
+    // 启动自愈：pnpm install/build 由可注入的 execFileP 模拟；成功即补齐产物文件
+    execFileP: (cmd, args) => {
+      commands.push(`${cmd} ${args.join(' ')}`);
+      if (cmd === 'pnpm' && args[0] === 'install') {
+        if (options.installFail) return Promise.reject(new Error('install failed'));
+        files.add(normalize(path.win32.join(root, 'node_modules/tsx/package.json')));
+        return Promise.resolve('');
+      }
+      if (cmd === 'pnpm' && args[0] === 'build') {
+        if (options.buildFail) return Promise.reject(new Error('build failed'));
+        files.add(normalize(path.win32.join(root, 'apps/cli/lib/bin.js')));
+        files.add(normalize(path.win32.join(root, 'apps/web/dist/index.html')));
+        return Promise.resolve('');
+      }
+      return Promise.reject(new Error(`unexpected command: ${cmd} ${args.join(' ')}`));
+    },
     logger: { log: message => logs.push(message), logError: message => logs.push(message) },
     isPortInUse: options.isPortInUse || (async () => false),
     probeUrl: options.probeUrl || (async () => true),
@@ -102,25 +118,55 @@ test('安装目录相邻仓库在 app.asar 外，并对候选去重', () => {
   assert.deepEqual(facts.repoPaths, ['C:\\deepseek-harness', 'C:\\App\\deepseek-harness']);
 });
 
-test('显式无效仓库不会退回 npx', async () => {
+test('显式无效仓库静默重查后退回 npx 兜底（需求M2-4）', async () => {
   const f = fixture({ roots: [] });
-  await assert.rejects(f.server.start(), { code: 'INVALID_REPO' });
-  assert.equal(f.children.length, 0);
-  assert.ok(!f.commands.includes('npm root -g'));
+  const started = await f.server.start();
+  assert.equal(started.reused, false);
+  assert.equal(started.source, 'npx');
+  assert.equal(f.children.length, 1);
+  assert.ok(f.logs.some(l => l.includes('不可用') || l.includes('重查')));
+  await f.server.stop();
 });
 
-for (const [file, code, hint] of [
-  ['apps/cli/src/bin.ts', 'MISSING_ENTRY', '恢复完整'],
-  ['node_modules/tsx/package.json', 'MISSING_DEPENDENCIES', 'pnpm install --frozen-lockfile'],
-  ['apps/cli/lib/bin.js', 'MISSING_BUILD', 'pnpm run build'],
-  ['apps/web/dist/index.html', 'MISSING_BUILD', 'pnpm run build']
+for (const [file, code] of [
+  ['apps/cli/src/bin.ts', 'MISSING_ENTRY'],
 ]) {
   test(`缺失 ${file} 提前给出修复步骤`, async () => {
     const f = fixture({ missing: [file] });
-    await assert.rejects(f.server.start(), error => error.code === code && error.message.includes(hint) && error.message.includes(root));
+    await assert.rejects(f.server.start(), error => error.code === code && error.message.includes('恢复完整') && error.message.includes(root));
     assert.equal(f.children.length, 0);
   });
 }
+
+test('依赖缺失时自动 pnpm install 后成功启动（需求M2-2）', async () => {
+  const f = fixture({ missing: ['node_modules/tsx/package.json'] });
+  const result = await f.server.start();
+  assert.equal(result.reused, false);
+  assert.ok(f.commands.some(c => c.startsWith('pnpm install')));
+  assert.equal(f.children.length, 1);
+  await f.server.stop();
+});
+
+test('依赖安装失败时抛 MISSING_DEPENDENCIES', async () => {
+  const f = fixture({ missing: ['node_modules/tsx/package.json'], installFail: true });
+  await assert.rejects(f.server.start(), { code: 'MISSING_DEPENDENCIES' });
+  assert.equal(f.children.length, 0);
+});
+
+test('构建产物缺失时自动 pnpm build 后成功启动（需求M2-2）', async () => {
+  const f = fixture({ missing: ['apps/cli/lib/bin.js'] });
+  const result = await f.server.start();
+  assert.equal(result.reused, false);
+  assert.ok(f.commands.some(c => c.startsWith('pnpm build')));
+  assert.equal(f.children.length, 1);
+  await f.server.stop();
+});
+
+test('构建失败时抛 MISSING_BUILD', async () => {
+  const f = fixture({ missing: ['apps/cli/lib/bin.js'], buildFail: true });
+  await assert.rejects(f.server.start(), { code: 'MISSING_BUILD' });
+  assert.equal(f.children.length, 0);
+});
 
 for (const tool of ['node', 'pnpm']) {
   test(`缺少 ${tool} 不启动子进程`, async () => {

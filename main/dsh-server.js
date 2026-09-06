@@ -2,6 +2,7 @@
 
 const path = require('path');
 const os = require('os');
+const { execFile } = require('node:child_process');
 const { redactOutput, createLineReader, parseLaunchUrl, createSessionProbe, probeDshService, terminateProcessTree } = require('./dsh-runtime');
 
 /**
@@ -59,6 +60,7 @@ function createDshServer(deps) {
   const { projectRoot, getDshConfig, logger = {} } = deps;
   const spawn = deps.spawn || require('node:child_process').spawn;
   const execSync = deps.execSync || require('node:child_process').execSync;
+  const execFileP = deps.execFileP || defaultExecFileP;
   const net = deps.net || require('node:net');
   const fs = deps.fs || require('node:fs');
   const osMod = deps.os || os;
@@ -101,10 +103,12 @@ function createDshServer(deps) {
   }
   function detectFacts() {
     const cfg = dshConfig();
-    if (cfg.path && !isRepository(cfg.path)) {
-      throw error('INVALID_REPO', `指定的 DSH 仓库不可用：${cfg.path}\n请选择含 package.json 和 dsh 启动脚本的仓库，或清除无效的 DSH_REPO_ROOT / 路径设置。`);
+    // 需求M2-4：配置路径/DSH_REPO_ROOT 无效时不再抛错，静默忽略并重新自动探测候选目录，最终可落 npx 兜底。
+    const configuredPath = (cfg.path && isRepository(cfg.path)) ? cfg.path : '';
+    if (cfg.path && !configuredPath) {
+      logger.log?.(`配置的 DSH 路径不可用（已静默重查）: ${cfg.path}`);
     }
-    const candidates = [cfg.path,
+    const candidates = [configuredPath,
       pathMod.join(pathMod.dirname(executablePath), '..', 'deepseek-harness'),
       pathMod.join(pathMod.dirname(executablePath), 'deepseek-harness'),
       pathMod.join(projectRoot, '..', 'deepseek-harness'),
@@ -131,9 +135,13 @@ function createDshServer(deps) {
         if (fs.existsSync(pathMod.join(candidate, 'package.json'))) npmGlobalPath = candidate;
       } catch { /* npm 不可用时，由所选启动方式的检查输出操作指引。 */ }
     }
-    return { repoPaths, hasGlobalCli, npmGlobalPath, hasSystemNode, configuredPath: cfg.path || '' };
+    return { repoPaths, hasGlobalCli, npmGlobalPath, hasSystemNode, configuredPath };
   }
-  function preflight(launch, facts, cfg) {
+  /**
+   * 启动前预检 + 自愈（需求M2-2：依赖缺失自动 install、构建产物缺失自动 build）。
+   * pnpm 在本函数之前已通过 commandAvailable 校验可用，故直接使用 pnpm。
+   */
+  async function preflight(launch, facts, cfg) {
     if (!facts.hasSystemNode) throw error('MISSING_NODE', '未找到可用的 Node.js。请安装满足 DSH 仓库 engines 要求的 Node.js，并重新启动桌面端。');
     const env = { ...environment, ...(cfg.env || {}) };
     for (const command of launch.cmd === 'npx' ? ['npm', 'npx'] : [launch.cmd]) {
@@ -144,9 +152,29 @@ function createDshServer(deps) {
     const inRepo = relative => fs.existsSync(pathMod.join(root, relative));
     const hint = `仓库：${root}\n请在此目录打开 PowerShell，运行：`;
     if (!inRepo('apps/cli/src/bin.ts')) throw error('MISSING_ENTRY', `DSH 源码启动入口缺失。\n${hint}\ngit status\n请恢复完整的 deepseek-harness 源码。`);
-    if (!inRepo('node_modules/tsx/package.json')) throw error('MISSING_DEPENDENCIES', `DSH 源码依赖尚未安装。\n${hint}\npnpm install --frozen-lockfile\npnpm run build`);
+    // 自愈：依赖缺失 → 自动 pnpm install
+    if (!inRepo('node_modules/tsx/package.json')) {
+      logger.log?.(`DSH 仓库依赖缺失，自动安装（pnpm install）: ${root}`);
+      try {
+        await execFileP('pnpm', ['install'], { cwd: root, timeoutMs: 900000 });
+      } catch (e) {
+        throw error('MISSING_DEPENDENCIES', `DSH 依赖自动安装失败：${e.message}\n${hint}\npnpm install --frozen-lockfile`);
+      }
+      if (!inRepo('node_modules/tsx/package.json')) {
+        throw error('MISSING_DEPENDENCIES', `DSH 依赖安装未生成 node_modules。\n${hint}\npnpm install`);
+      }
+    }
+    // 自愈：构建产物缺失 → 自动 pnpm build
     if (!inRepo('apps/cli/lib/bin.js') || !inRepo('apps/web/dist/index.html')) {
-      throw error('MISSING_BUILD', `DSH 构建产物缺失。\n${hint}\npnpm run build`);
+      logger.log?.(`DSH 构建产物缺失，自动构建（pnpm build）: ${root}`);
+      try {
+        await execFileP('pnpm', ['build'], { cwd: root, timeoutMs: 900000 });
+      } catch (e) {
+        throw error('MISSING_BUILD', `DSH 自动构建失败：${e.message}\n${hint}\npnpm run build`);
+      }
+      if (!inRepo('apps/cli/lib/bin.js') || !inRepo('apps/web/dist/index.html')) {
+        throw error('MISSING_BUILD', `DSH 构建产物仍缺失。\n${hint}\npnpm run build`);
+      }
     }
   }
   function isPortInUse(port) {
@@ -269,7 +297,7 @@ function createDshServer(deps) {
     const facts = detectFacts();
     const launch = resolveLaunch(attempt.cfg, facts);
     attempt.launch = launch;
-    preflight(launch, facts, attempt.cfg);
+    await preflight(launch, facts, attempt.cfg);
     assertActive(attempt);
     lastStdout = '';
     lastStderr = '';
@@ -365,4 +393,19 @@ function createDshServer(deps) {
   return { start, stop, restart, isPortInUse, isServerReady, hasDshService, login, waitForServer, detectFacts, resolveLaunch, status, dshUrl };
 }
 
-module.exports = { resolveLaunch, createDshServer };
+/** execFile 的 Promise 封装（argv 数组，不拼 shell 字符串；超时可注入测试缩短）。 */
+function defaultExecFileP(cmd, args, opts = {}) {
+  const { timeoutMs = 30000, cwd } = opts;
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { cwd, timeout: timeoutMs, windowsHide: true, encoding: 'utf-8' }, (err, stdout, stderr) => {
+      if (err) {
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve(stdout || '');
+    });
+  });
+}
+
+module.exports = { resolveLaunch, createDshServer, defaultExecFileP };

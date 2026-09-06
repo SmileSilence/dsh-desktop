@@ -15,6 +15,8 @@ test('DEFAULTS 形状符合 §15.5 schema', () => {
   assert.equal(DEFAULTS.hotkeySettings, 'CommandOrControl+,');
   assert.equal(DEFAULTS.hotkeyAbout, 'F1');
   assert.equal(DEFAULTS.hotkeyRestartBackend, 'CommandOrControl+Shift+R');
+  assert.equal(DEFAULTS.hotkeyRestartApp, 'CommandOrControl+Shift+Alt+R');
+  assert.equal(DEFAULTS.hotkeyDevTools, 'F12');
   assert.equal(DEFAULTS.hotkeyNewTab, 'CommandOrControl+T');
   assert.equal(DEFAULTS.dsh.port, 3080);
   assert.equal(DEFAULTS.dsh.checkOnStartup, false);

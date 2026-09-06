@@ -5,7 +5,7 @@ const { Tray, Menu, nativeImage } = require('electron');
 
 /**
  * 系统托盘（P1.5 / B4 增强）。
- * 菜单：显示/隐藏、新建对话、重启后端、设置、关于、退出。
+ * 菜单：显示/隐藏、新建对话、重启后端、重启软件+后端、开发者模式、设置、关于、退出。
  */
 
 /**
@@ -15,6 +15,8 @@ const { Tray, Menu, nativeImage } = require('electron');
  *   onShowWindow:Function,
  *   onNewChat:Function,
  *   onRestartBackend:Function,
+ *   onRestartApp:Function,
+ *   onDevTools:Function,
  *   onSettings:Function,
  *   onAbout:Function,
  *   onQuit:Function,
@@ -24,8 +26,8 @@ const { Tray, Menu, nativeImage } = require('electron');
  */
 function createTray(deps) {
   const {
-    getIcon, getLang, onShowWindow, onNewChat, onRestartBackend,
-    onSettings, onAbout, onQuit, getTabs, onActivateTab, logger = {}
+    getIcon, getLang, onShowWindow, onNewChat, onRestartBackend, onRestartApp, onDevTools,
+    onSettings, onHotkeys, onAbout, onQuit, getTabs, onActivateTab, logger = {}
   } = deps;
 
   let tray = null;
@@ -41,8 +43,12 @@ function createTray(deps) {
       }] : []),
       { type: 'separator' },
       { label: lang.trayRestartBackend || '重启后端', click: () => onRestartBackend?.() },
+      { label: lang.trayRestartApp || '重启软件+后端', click: () => onRestartApp?.() },
+      { type: 'separator' },
+      { label: lang.trayDevTools || '开发者模式 (F12)', click: () => onDevTools?.() },
       { type: 'separator' },
       { label: lang.traySettings, click: () => onSettings() },
+      { label: lang.trayHotkeys || '快捷键设置', click: () => onHotkeys?.() },
       { type: 'separator' },
       { label: lang.trayAbout, click: () => onAbout() },
       { type: 'separator' },

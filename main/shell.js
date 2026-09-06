@@ -4,6 +4,7 @@
   const startupMessage = document.getElementById('startup-message');
   const startupDetail = document.getElementById('startup-detail');
   const loadingTrack = document.getElementById('loading-track');
+  const startupActions = document.getElementById('startup-actions');
   window.dshDesktop.onTabsState((state) => {
     tabs.dataset.position = state.position;
     tabs.hidden = !state.showTabbar;
@@ -82,10 +83,57 @@
   });
   window.dshDesktop.requestTabsState();
   window.dshDesktop.onAppReady(() => { startupView.hidden = true; });
-  window.dshDesktop.onAppLoadError((detail) => {
+  window.dshDesktop.onAppLoadError((payload) => {
+    // 兼容旧字符串与新结构化数据
+    const data = (typeof payload === 'string') ? { detail: payload, suspectPlugins: [] } : (payload || {});
     startupMessage.textContent = 'DSH Web 服务启动失败';
-    startupDetail.textContent = String(detail || '未知错误');
+    startupDetail.textContent = String(data.detail || '未知错误');
     startupDetail.hidden = false;
     loadingTrack.hidden = true;
+    renderRecoveryActions(data.suspectPlugins || [], data.archivedTo || null);
   });
+
+  function renderRecoveryActions(suspectPlugins, archivedTo) {
+    startupActions.replaceChildren();
+    const hint = document.createElement('p');
+    hint.className = 'startup-hint';
+    hint.textContent = archivedTo
+      ? `完整启动失败日志已保存到：${archivedTo}`
+      : '启动失败。';
+    startupActions.append(hint);
+
+    if (suspectPlugins.length > 0) {
+      for (const name of suspectPlugins) {
+        const btn = document.createElement('button');
+        btn.className = 'recovery-btn';
+        btn.textContent = `禁用插件「${name}」并重启`;
+        btn.addEventListener('click', () => disablePlugins([name], btn));
+        startupActions.append(btn);
+      }
+    }
+    const allBtn = document.createElement('button');
+    allBtn.className = 'recovery-btn recovery-btn-danger';
+    allBtn.textContent = '一键禁用所有插件并重启';
+    allBtn.addEventListener('click', () => disablePlugins(null, allBtn));
+    startupActions.append(allBtn);
+    startupActions.hidden = false;
+  }
+
+  function disablePlugins(names, btn) {
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '正在禁用并重启…';
+    window.dshDesktop.disablePluginsAndRestart(names).then((result) => {
+      if (result.ok) {
+        btn.textContent = `已禁用 ${(result.removed || []).join(', ')}，正在重启`;
+      } else {
+        btn.textContent = `操作失败：${result.message || '未知错误'}`;
+        btn.disabled = false;
+      }
+    }).catch((e) => {
+      btn.textContent = `操作失败：${e.message}`;
+      btn.disabled = false;
+    });
+  }
 })();

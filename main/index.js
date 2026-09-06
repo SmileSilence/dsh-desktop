@@ -29,6 +29,7 @@ const { checkForUpdate } = require('./updater');
 const { buildDiagnostics } = require('./diagnostics');
 const { createDshUpdate } = require('./dsh-update');
 const { createTabManager } = require('./tab-manager');
+const { detectSuspectPlugins, failureLogName, readBundles, writeBundles, disableBundles, disableAllThirdParty } = require('./plugin-recovery');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const HOTKEY = 'CommandOrControl+Shift+D';
@@ -103,6 +104,10 @@ const LANG = {
   traySettings: '设置',
   trayAbout: '关于',
   trayQuit: '退出',
+  trayRestartBackend: '重启后端',
+  trayRestartApp: '重启软件+后端',
+  trayDevTools: '开发者模式 (F12)',
+  trayHotkeys: '快捷键设置',
 
   // 设置
   settingsTitle: '设置',
@@ -163,7 +168,7 @@ const LANG = {
 
   // 关于
   aboutTitle: '关于 DSH Desktop',
-  aboutVersion: '版本：1.3.1',
+  aboutVersion: '版本：1.4.0',
   aboutDescription: '类 ChatGPT 桌面客户端 - AI 助手',
   aboutAuthor: '作者：SmileSilence',
   aboutLicense: '许可证：MIT',
@@ -185,6 +190,8 @@ const LANG = {
   hotkeySettings: '打开设置',
   hotkeyAbout: '打开关于',
   hotkeyRestartBackend: '重启后端',
+  hotkeyRestartApp: '重启软件+后端',
+  hotkeyDevTools: '开发者模式',
   hotkeyNewTab: '新建页签',
   hotkeyNotSet: '不设置',
   hotkeyCapture: '按下新快捷键...',
@@ -235,6 +242,10 @@ function loadLanguage(lang) {
       traySettings: 'Settings',
       trayAbout: 'About',
       trayQuit: 'Quit',
+      trayRestartBackend: 'Restart Backend',
+      trayRestartApp: 'Restart App & Backend',
+      trayDevTools: 'Developer Mode (F12)',
+      trayHotkeys: 'Hotkey Settings',
       settingsTitle: 'Settings',
       settingsGeneral: 'General Settings',
       settingsHotkey: 'Hotkey Settings',
@@ -285,7 +296,7 @@ function loadLanguage(lang) {
       msgRestart: 'Restart',
       msgLater: 'Later',
       aboutTitle: 'About DSH Desktop',
-      aboutVersion: 'Version: 1.3.1',
+      aboutVersion: 'Version: 1.4.0',
       aboutDescription: 'ChatGPT-like Desktop Client - AI Assistant',
       aboutAuthor: 'Author: SmileSilence',
       aboutLicense: 'License: MIT',
@@ -302,6 +313,8 @@ function loadLanguage(lang) {
       hotkeySettings: 'Open Settings',
       hotkeyAbout: 'Open About',
       hotkeyRestartBackend: 'Restart Backend',
+      hotkeyRestartApp: 'Restart App & Backend',
+      hotkeyDevTools: 'Developer Mode',
       hotkeyNewTab: 'New Tab',
       hotkeyNotSet: 'Not Set',
       hotkeyCapture: 'Press new shortcut...',
@@ -343,7 +356,17 @@ const trayModule = createTrayModule({
     logger.log('托盘触发重启后端...');
     dshServer.restart().catch((e) => logger.logError(`重启后端失败: ${e.message}`));
   },
+  onRestartApp: () => {
+    logger.log('托盘触发重启软件+后端...');
+    restartAppAndBackend();
+  },
+  onDevTools: () => {
+    logger.log('托盘触发开发者模式...');
+    showWindow();
+    tabManager?.openDevTools();
+  },
   onSettings: () => showSettings(),
+  onHotkeys: () => showHotkeys(),
   onAbout: () => showAbout(),
   onQuit: () => {
     isQuitting = true;
@@ -443,7 +466,60 @@ function applyConfigToRuntime(next) {
   applyLoginItem(next.tray.autoLaunch);
 }
 
-/** 窗口动作（§15.1 白名单） */
+/** 重启整个软件 + 后端（需求M3-6）：停止后端后 relaunch 应用，退出码由 relaunch 接管。 */
+function restartAppAndBackend() {
+  isQuitting = true;
+  logger.log('正在重启软件与后端...');
+  dshServer.stop()
+    .catch((e) => logger.logError(`停止后端失败（仍继续重启）: ${e.message}`))
+    .finally(() => {
+      app.relaunch({ args: process.argv.slice(1) });
+      app.exit(0);
+    });
+}
+
+// ============ 插件启动故障恢复（需求M6） ============
+
+/** 安装目录（打包态 = exe 所在目录；开发态 = 项目根）。完整启动日志归档于此目录下的 log 文件夹。 */
+function installDir() {
+  return app.isPackaged ? path.dirname(process.execPath) : PROJECT_ROOT;
+}
+
+/** DSH web profile 的 package.json 路径（~/.dsh/profiles/web/package.json）。 */
+function webProfilePackagePath() {
+  return path.join(resolveDshHomePath(), 'profiles', 'web', 'package.json');
+}
+
+/** 把启动失败完整日志归档到 <安装目录>/log/<带时间戳>.log；返回归档文件绝对路径（失败返回 null）。 */
+function archiveStartupFailure(fullLog) {
+  try {
+    const dir = path.join(installDir(), 'log');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, failureLogName());
+    fs.writeFileSync(file, String(fullLog || ''), 'utf-8');
+    logger.log(`启动失败日志已归档: ${file}`);
+    return file;
+  } catch (e) {
+    logger.logError(`启动失败日志归档失败: ${e.message}`);
+    return null;
+  }
+}
+
+/** 从当前 web profile bundles 中禁用指定插件（或全部第三方），成功返回移除列表。 */
+function disableWebPlugins(names) {
+  const pkgPath = webProfilePackagePath();
+  const bundles = readBundles(pkgPath, fs);
+  if (bundles.length === 0) return { removed: [], bundles: [] };
+  const result = names === null
+    ? disableAllThirdParty(bundles)
+    : disableBundles(bundles, names);
+  if (result.removed.length === 0) return result;
+  if (!writeBundles(pkgPath, result.bundles, fs)) {
+    throw new Error(`写入插件清单失败: ${pkgPath}`);
+  }
+  logger.log(`已禁用插件: ${result.removed.join(', ')}`);
+  return result;
+}
 function applyWindowAction(action) {
   if (!mainWindow) throw new Error('主窗口尚未创建');
   switch (action) {
@@ -924,6 +1000,13 @@ function showSettings(activate = true) {
   tabManager?.openInternal('settings', currentLang.settingsTitle, settingsUrl, activate);
 }
 
+// ============ 主窗口内置快捷键页签（需求M4） ============
+function showHotkeys(activate = true) {
+  if (activate) showWindow();
+  const hotkeysUrl = `${pathToFileURL(path.join(__dirname, 'internal.html')).href}?view=hotkeys`;
+  tabManager?.openInternal('hotkeys', currentLang.settingsHotkey, hotkeysUrl, activate);
+}
+
 // ============ DSH 安装状态检查（回显经 escapeHtml，D2） ============
 function showDshInstallationStatusHtml() {
   let status;
@@ -961,11 +1044,19 @@ function showAbout(activate = true) {
 // ============ 注册全局快捷键 ============
 const hotkeyActions = {
   hotkey: () => { if (mainWindow) mainWindow.isVisible() ? mainWindow.hide() : showWindow(); },
-  hotkeySettings: () => showSettings(),
+  hotkeySettings: () => showHotkeys(),
   hotkeyAbout: () => showAbout(),
   hotkeyRestartBackend: () => {
     logger.log('快捷键触发重启后端...');
     dshServer.restart().catch((e) => logger.logError(`重启后端失败: ${e.message}`));
+  },
+  hotkeyRestartApp: () => {
+    logger.log('快捷键触发重启软件+后端...');
+    restartAppAndBackend();
+  },
+  hotkeyDevTools: () => {
+    showWindow();
+    tabManager?.openDevTools();
   },
   hotkeyNewTab: () => { if (appContentReady && mainWindow) { showWindow(); tabManager?.add(); } }
 };
@@ -1011,6 +1102,25 @@ ipcMain.handle('dsh-login', async (event, loginUrl) => {
     tabManager?.reloadAll?.();
     setTimeout(ensureApiKeyGuide, 1000);
     return { ok: true };
+  } catch (err) {
+    return { ok: false, message: escapeHtml(err.message) };
+  }
+});
+
+// 需求M6：禁用故障插件（names=null 表示禁用所有第三方插件）并自动重启后端
+ipcMain.handle('disable-plugins-and-restart', async (event, names) => {
+  if (!event.sender || event.sender !== mainWindow?.webContents) {
+    return { ok: false, message: '仅允许主窗口发起插件禁用。' };
+  }
+  try {
+    const nameList = names === null ? null : (Array.isArray(names) ? names.map(String) : []);
+    const result = disableWebPlugins(nameList);
+    if (result.removed.length === 0) {
+      return { ok: false, message: '未找到需要禁用的插件。' };
+    }
+    logger.log(`插件已禁用，自动重启后端: ${result.removed.join(', ')}`);
+    await dshServer.restart().catch((e) => logger.logError(`禁用插件后重启后端失败: ${e.message}`));
+    return { ok: true, removed: result.removed };
   } catch (err) {
     return { ok: false, message: escapeHtml(err.message) };
   }
@@ -1218,8 +1328,24 @@ app.whenReady().then(async () => {
 
     const errorDetail = `DSH Web 服务启动失败（${err.code || 'START_FAILED'}）：\n${err.message}`;
 
+    // 需求M6：归档本次完整启动失败日志到 <安装目录>/log/（带时间戳）
+    const status = dshServer.status();
+    const fullLog = [status.lastStderr, status.lastStdout].filter(Boolean).join('\n') || err.message;
+    const archivedTo = archiveStartupFailure(fullLog);
+
+    // 需求M6：从日志识别疑似故障插件（只匹配当前 web profile 实际启用的 bundles）
+    let suspectPlugins = [];
+    try {
+      const bundles = readBundles(webProfilePackagePath(), fs);
+      suspectPlugins = detectSuspectPlugins(fullLog, bundles);
+    } catch (e) {
+      logger.logError(`插件诊断失败: ${e.message}`);
+    }
+
     await shellReadyPromise;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app-load-error', errorDetail);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app-load-error', { detail: errorDetail, suspectPlugins, archivedTo });
+    }
     return;
   }
 

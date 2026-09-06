@@ -127,8 +127,7 @@ test('createDshUpdate.checkUpdate: npx 来源 + npm 最新版', async () => {
   const updater = createDshUpdate({
     getLaunch: () => ({ source: 'npx', cmd: 'npx', args: [], cwd: null }),
     getDshConfig: () => ({ dsh: {} }),
-    getNpmViewVersion: async () => '0.1.1-rc.2',
-    execFileP: async () => '0.1.0-rc.8\n',
+    execFileP: async (cmd, args) => (cmd === 'npm' && args[0] === 'view') ? '0.1.1-rc.2\n' : '0.1.0-rc.8\n',
     now: () => 100000, // 首次调用时远离节流窗口
     throttleMs: 60 * 1000,
     logger: {}
@@ -137,6 +136,28 @@ test('createDshUpdate.checkUpdate: npx 来源 + npm 最新版', async () => {
   assert.equal(r.kind, 'npx');
   assert.equal(r.currentVersion, '0.1.0-rc.8');
   assert.equal(r.latestVersion, '0.1.1-rc.2');
+  assert.equal(r.hasUpdate, true);
+});
+
+test('createDshUpdate.checkUpdate: local-repo 按 Git 上游落后提交判断', async () => {
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.0' }) },
+    execFileP: async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'origin/main\n';
+      if (cmd === 'git' && args[0] === 'fetch') return '';
+      if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc123\n';
+      if (cmd === 'git' && args[0] === 'rev-list') return '3\n';
+      return '';
+    },
+    now: () => 100000,
+    throttleMs: 60 * 1000,
+    logger: {}
+  });
+  const r = await updater.checkUpdate(false);
+  assert.equal(r.kind, 'local-repo');
+  assert.equal(r.behind, 3);
   assert.equal(r.hasUpdate, true);
 });
 

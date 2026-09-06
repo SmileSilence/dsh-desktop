@@ -17,6 +17,8 @@ const DEFAULTS = {
   hotkeySettings: 'CommandOrControl+,', // 打开设置
   hotkeyAbout: 'F1', // 打开关于
   hotkeyRestartBackend: 'CommandOrControl+Shift+R', // 重启后端
+  hotkeyRestartApp: 'CommandOrControl+Shift+Alt+R', // 重启软件+后端（整个桌面端连同后端一起重启）
+  hotkeyDevTools: 'F12', // 开发者模式（当前活动页签的 DevTools）
   hotkeyNewTab: 'CommandOrControl+T', // 新建页签
   dsh: {
     path: '', // DSH 仓库路径，空 = 自动探测
@@ -166,7 +168,7 @@ function validateConfig(cfg) {
   check('tray.topMost', typeof t.topMost === 'boolean', 'tray.topMost 必须为布尔值');
 
   // hotkey：字符串（Electron accelerator 格式宽松校验；空字符串 = 禁用该快捷键）
-  for (const hk of ['hotkey', 'hotkeySettings', 'hotkeyAbout', 'hotkeyRestartBackend', 'hotkeyNewTab']) {
+  for (const hk of ['hotkey', 'hotkeySettings', 'hotkeyAbout', 'hotkeyRestartBackend', 'hotkeyRestartApp', 'hotkeyDevTools', 'hotkeyNewTab']) {
     check(hk, typeof cfg[hk] === 'string', `${hk} 必须为字符串（可为空=禁用）`);
   }
 

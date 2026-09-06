@@ -8,7 +8,7 @@ SetCompressor /SOLID lzma
 
 Name "DeepSeek Harness"
 OutFile "dist\DeepSeek Harness-${VERSION}-Setup.exe"
-InstallDir "$LOCALAPPDATA\Programs\DeepSeek Harness"
+InstallDir "$LOCALAPPDATA\Programs\DSH_Desktop"
 InstallDirRegKey HKCU "Software\DeepSeek Harness" "InstallDir"
 RequestExecutionLevel user
 
@@ -79,7 +79,7 @@ Function DshPageCreate
   ${NSD_CreateRadioButton} 10u 52u 100% 14u "全局安装（推荐）：npm install -g @deepseek-ai/dsh"
   Pop $DshRadioGlobal
 
-  ${NSD_CreateRadioButton} 10u 72u 100% 14u "源码安装：克隆 deepseek-harness 源码并构建到用户目录"
+  ${NSD_CreateRadioButton} 10u 72u 100% 14u "源码安装：克隆 deepseek-harness 源码并构建到软件安装目录"
   Pop $DshRadioSource
 
   ${NSD_CreateLabel} 10u 92u 100% 44u "提示：两种安装均需联网，时长视网络而定。$\r$\n全局安装仅需 Node.js；源码安装还需 git 与 Node.js（>= 22）。$\r$\n如未满足条件，安装程序会自动跳过并给出说明。"
@@ -157,7 +157,7 @@ Function InstallDshGlobal
   ${EndIf}
 FunctionEnd
 
-; 源码安装 DSH：git clone + corepack pnpm install（到 %USERPROFILE%\deepseek-harness）
+; 源码安装 DSH：git clone + corepack pnpm install + build（到 $INSTDIR\deepseek-harness）
 Function InstallDshSource
   Call CheckNode
   ${If} $HasNode = 0
@@ -169,8 +169,7 @@ Function InstallDshSource
     MessageBox MB_ICONEXCLAMATION|MB_OK "未检测到 git，无法源码安装 DSH。$\r$\n请安装 Git：https://git-scm.com，或改用全局安装。"
     Return
   ${EndIf}
-  ReadEnvStr $DshRepoPath "USERPROFILE"
-  StrCpy $DshRepoPath "$DshRepoPath\deepseek-harness"
+  StrCpy $DshRepoPath "$INSTDIR\deepseek-harness"
   MessageBox MB_ICONQUESTION|MB_YESNO "即将克隆 deepseek-harness 源码并构建到：$\r$\n  $DshRepoPath$\r$\n$\r$\n此过程需要联网（git 克隆 + 依赖安装），耗时较长，是否继续？" IDYES dsh_source_go
     Return
   dsh_source_go:
@@ -179,15 +178,15 @@ Function InstallDshSource
   FileWrite $0 'echo ============================================$\r$\n'
   FileWrite $0 'echo  正在源码安装 DSH 后端 (clone + pnpm)...$\r$\n'
   FileWrite $0 'echo ============================================$\r$\n'
-  FileWrite $0 'if exist "%USERPROFILE%\deepseek-harness" ($\r$\n'
+  FileWrite $0 'if exist "$DshRepoPath" ($\r$\n'
   FileWrite $0 '  echo [1/3] 目标目录已存在，跳过克隆（非本次安装创建，卸载时不会删除）。$\r$\n'
   FileWrite $0 ') else ($\r$\n'
   FileWrite $0 '  echo [1/3] 正在克隆 deepseek-harness 源码 ...$\r$\n'
-  FileWrite $0 '  git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git "%USERPROFILE%\deepseek-harness"$\r$\n'
+  FileWrite $0 '  git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git "$DshRepoPath"$\r$\n'
   FileWrite $0 '  if errorlevel 1 exit /b 1$\r$\n'
-  FileWrite $0 '  echo installed-by-dsh-desktop > "%USERPROFILE%\deepseek-harness\.dsh-desktop-install"$\r$\n'
+  FileWrite $0 '  echo installed-by-dsh-desktop > "$DshRepoPath\.dsh-desktop-install"$\r$\n'
   FileWrite $0 ')$\r$\n'
-  FileWrite $0 'cd /d "%USERPROFILE%\deepseek-harness"$\r$\n'
+  FileWrite $0 'cd /d "$DshRepoPath"$\r$\n'
   FileWrite $0 'echo [2/3] 正在安装依赖 (corepack pnpm install) ...$\r$\n'
   FileWrite $0 'corepack pnpm install$\r$\n'
   FileWrite $0 'if errorlevel 1 ($\r$\n'
@@ -197,7 +196,10 @@ Function InstallDshSource
   FileWrite $0 '  pnpm install$\r$\n'
   FileWrite $0 '  if errorlevel 1 exit /b 1$\r$\n'
   FileWrite $0 ')$\r$\n'
-  FileWrite $0 'echo [3/3] 源码安装完成。$\r$\n'
+  FileWrite $0 'echo [3/3] 正在构建 DSH 后端 ...$\r$\n'
+  FileWrite $0 'corepack pnpm build$\r$\n'
+  FileWrite $0 'if errorlevel 1 exit /b 1$\r$\n'
+  FileWrite $0 'echo [4/4] 源码安装完成。$\r$\n'
   FileClose $0
   ExecWait 'cmd /c "$TEMP\dsh-install-source.cmd"' $1
   ${If} $1 != 0
@@ -267,7 +269,7 @@ Function un.UnDshPageCreate
   ${NSD_CreateCheckBox} 10u 62u 100% 12u "卸载 DSH 全局安装（npm uninstall -g @deepseek-ai/dsh）"
   Pop $UnDshGlobalCtrl
 
-  ${NSD_CreateCheckBox} 10u 78u 100% 12u "删除 DSH 源码目录（%USERPROFILE%\deepseek-harness，仅限安装包创建）"
+  ${NSD_CreateCheckBox} 10u 78u 100% 12u "删除 DSH 源码目录（安装目录下 deepseek-harness，仅限安装包创建）"
   Pop $UnDshSourceCtrl
 
   ${NSD_CreateLabel} 10u 96u 100% 40u "提示：DSH 数据（会话与 API 凭据）删除后不可恢复。$\r$\n如需保留 DSH 后端，请取消勾选相应选项。$\r$\n仅勾选全局/源码项时，若未检测到对应安装会自动跳过。"
@@ -317,8 +319,7 @@ FunctionEnd
 
 ; 删除 DSH 源码目录（仅当目录带安装标记，避免误删用户自己的仓库）
 Function un.UnInstallDshSource
-  ReadEnvStr $DshRepoPath "USERPROFILE"
-  StrCpy $DshRepoPath "$DshRepoPath\deepseek-harness"
+  StrCpy $DshRepoPath "$INSTDIR\deepseek-harness"
   IfFileExists "$DshRepoPath\.dsh-desktop-install" un_rm_repo
     MessageBox MB_ICONINFORMATION|MB_OK "$DshRepoPath 不是由安装包创建的（无安装标记），已跳过删除。"
     Return
@@ -366,6 +367,10 @@ Section "Uninstall"
   ${If} $UnAppData = 1
     RMDir /r "$APPDATA\dsh-desktop"
   ${EndIf}
+
+  ; 5) 删除 DSH 专用用户环境变量 DSH_REPO_ROOT，并广播环境变更使其它进程生效
+  DeleteRegValue HKCU "Environment" "DSH_REPO_ROOT"
+  SendMessage 0xFFFF 0x001A 0 "STR:Environment" /TIMEOUT=2000
 
   RMDir /r "$INSTDIR"
 SectionEnd
