@@ -165,8 +165,9 @@ function createMainWindow(deps) {
     },
     ...windowConfigFor(process.platform),
     backgroundColor: chrome.bg, // chromeColorsFor(getThemeMode())：dark #151517 / light #ffffff
-    alwaysOnTop: cfg.tray && cfg.tray.topMost,
-    ...(isWin11() ? { backgroundMaterial: 'mica' } : {})
+    alwaysOnTop: cfg.tray && cfg.tray.topMost
+    // 不使用 backgroundMaterial（mica）：Electron 35 上它会破坏窗口框架样式，
+    // 导致最大化按钮失效与 Win11 Snap Layouts 浮层不出现（electron#41824/#47366）。
   });
 
   if (bounds.maximized) win.maximize();

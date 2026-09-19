@@ -29,7 +29,7 @@ const { checkForUpdate } = require('./updater');
 const { buildDiagnostics } = require('./diagnostics');
 const { createDshUpdate } = require('./dsh-update');
 const { createTabManager } = require('./tab-manager');
-const { detectSuspectPlugins, failureLogName, readBundles, writeBundles, disableBundles, disableAllThirdParty } = require('./plugin-recovery');
+const { detectSuspectPlugins, failureLogName, readBundles, writeBundles, disableBundles, disableAllThirdParty, BUILTIN_BUNDLES } = require('./plugin-recovery');
 const { createAppUpdater, backupDirFor } = require('./app-updater');
 const https = require('https');
 const crypto = require('crypto');
@@ -174,7 +174,7 @@ const LANG = {
 
   // 关于
   aboutTitle: '关于 DSH Desktop',
-  aboutVersion: '版本：1.4.0',
+  aboutVersion: '版本：1.4.1',
   aboutDescription: '类 ChatGPT 桌面客户端 - AI 助手',
   aboutAuthor: '作者：SmileSilence',
   aboutLicense: '许可证：MIT',
@@ -304,7 +304,7 @@ function loadLanguage(lang) {
       msgRestart: 'Restart',
       msgLater: 'Later',
       aboutTitle: 'About DSH Desktop',
-      aboutVersion: 'Version: 1.4.0',
+      aboutVersion: 'Version: 1.4.1',
       aboutDescription: 'ChatGPT-like Desktop Client - AI Assistant',
       aboutAuthor: 'Author: SmileSilence',
       aboutLicense: 'License: MIT',
@@ -462,7 +462,7 @@ function applyLoginItem(autoLaunch) {
 /** 配置变更即时应用到运行时（置顶/任务栏/菜单/托盘/登录项） */
 function applyConfigToRuntime(next) {
   if (mainWindow) {
-    mainWindow.setAlwaysOnTop(!!next.tray.topMost, next.tray.topMost ? 'screen-saver' : 'normal');
+    mainWindow.setAlwaysOnTop(!!next.tray.topMost, next.tray.topMost ? 'floating' : 'normal');
     mainWindow.setSkipTaskbar(!next.tray.showInTaskbar);
   }
   tabManager?.layout();
@@ -1046,7 +1046,7 @@ function createMainWindow({ deferInitialTab = false } = {}) {
   // 窗口置顶可靠性（修改项 4）：show/restore 后重断言，避免系统复位
   const assertTopMost = () => {
     if (mainWindow && !mainWindow.isDestroyed() && getConfig().tray.topMost) {
-      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.setAlwaysOnTop(true, 'floating');
     }
   };
   mainWindow.on('show', assertTopMost);
@@ -1256,7 +1256,8 @@ ipcMain.handle('dsh-login', async (event, loginUrl) => {
   }
 });
 
-// 需求M6：禁用故障插件（names=null 表示禁用所有第三方插件）并自动重启后端
+// 需求M6：禁用故障插件（names=null 表示禁用所有第三方插件）并重启后端。
+// 禁用是单次本地 JSON 改写（毫秒级），先落盘立即返回；后端重启放后台执行，不阻塞 UI。
 ipcMain.handle('disable-plugins-and-restart', async (event, names) => {
   if (!event.sender || event.sender !== mainWindow?.webContents) {
     return { ok: false, message: '仅允许主窗口发起插件禁用。' };
@@ -1267,9 +1268,9 @@ ipcMain.handle('disable-plugins-and-restart', async (event, names) => {
     if (result.removed.length === 0) {
       return { ok: false, message: '未找到需要禁用的插件。' };
     }
-    logger.log(`插件已禁用，自动重启后端: ${result.removed.join(', ')}`);
-    await dshServer.restart().catch((e) => logger.logError(`禁用插件后重启后端失败: ${e.message}`));
-    return { ok: true, removed: result.removed };
+    logger.log(`插件已禁用，后台重启后端: ${result.removed.join(', ')}`);
+    dshServer.restart().catch((e) => logger.logError(`禁用插件后重启后端失败: ${e.message}`));
+    return { ok: true, removed: result.removed, restarting: true };
   } catch (err) {
     return { ok: false, message: escapeHtml(err.message) };
   }
@@ -1287,13 +1288,32 @@ ipcMain.on('refresh-dsh-status', (event) => {
 
 ipcMain.handle('internal-page-data', (event) => {
   if (!isInternalPageSender(event)) throw new Error('仅允许内置页面读取配置');
+  const bundles = readBundles(webProfilePackagePath(), fs);
   return {
     config: getConfig(),
     language: currentLang,
     theme: themeMode(),
     dshStatusHtml: showDshInstallationStatusHtml(),
-    appVersion: app.getVersion()
+    appVersion: app.getVersion(),
+    pluginBundles: bundles,
+    builtinBundles: BUILTIN_BUNDLES
   };
+});
+
+// 设置页：一键禁用所有第三方插件（重启后端后台执行，立即返回）
+ipcMain.handle('internal-disable-all-plugins', (event) => {
+  if (!isInternalPageSender(event)) throw new Error('仅允许内置页面禁用插件');
+  try {
+    const result = disableWebPlugins(null);
+    if (result.removed.length === 0) {
+      return { ok: false, message: '未安装任何第三方插件，无需禁用。' };
+    }
+    logger.log(`设置页禁用所有第三方插件，后台重启后端: ${result.removed.join(', ')}`);
+    dshServer.restart().catch((e) => logger.logError(`禁用插件后重启后端失败: ${e.message}`));
+    return { ok: true, removed: result.removed, restarting: true };
+  } catch (err) {
+    return { ok: false, message: escapeHtml(err.message) };
+  }
 });
 
 ipcMain.handle('internal-confirm', (event, message) => {
@@ -1565,6 +1585,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// F11 全屏切换（Windows 无菜单栏，role:fullscreen 不可用；对所有页面生效，含 DSH 标签页）
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('before-input-event', (inputEvent, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11') {
+      inputEvent.preventDefault();
+      const win = BrowserWindow.fromWebContents(contents);
+      if (win && !win.isDestroyed()) win.setFullScreen(!win.isFullScreen());
+    }
+  });
 });
 
 // ============ 退出前清理 ============

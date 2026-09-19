@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
+const { compareSemver, stripVersionPrefix } = require('./lib/semver');
 
 /**
  * 本地 DSH 更新（G1 / P3.4 / architecture §16）。
@@ -125,32 +126,76 @@ function createDshUpdate(deps) {
   }
 
   /**
-   * 检查本地源码仓库的 Git 上游更新（fetch 只更新远程跟踪分支，不触碰工作区）。
-   * @returns {Promise<{latestVersion:string|null, behind:number, hasGitUpdate:boolean}>}
+   * 检查本地源码仓库的官方发布 tag 更新（fetch 只更新远程引用，不触碰工作区）。
+   * DSH 以 git tag 发布（如 dsh-v0.1.6-alpha.1）；取所有 tag 中 semver 最高的作为「最新」。
+   * 无任何 tag 时回退比较默认上游分支（origin/HEAD → 实际默认分支名）。
+   * @returns {Promise<{latestVersion:string|null, behind:number, hasGitUpdate:boolean, error:string|null}>}
    */
   async function latestFromGit(cwd) {
-    const self = { latestVersion: null, behind: 0, hasGitUpdate: false };
+    const self = { latestVersion: null, behind: 0, hasGitUpdate: false, error: null };
+    const fail = (msg) => { self.error = msg; logger.log?.(`Git 更新检查失败（${kindSafe(cwd)}）: ${msg}`); return self; };
+    let remote = 'origin';
     try {
-      // 先取得当前分支的上游（默认 origin/main）
-      let upstream = 'origin/main';
+      const remotes = (await execFileP('git', ['remote'], { cwd, timeoutMs: 15000 })).trim().split('\n').filter(Boolean);
+      if (remotes.length > 0) remote = remotes[0];
+    } catch (e) { return fail(`git remote 不可用: ${e.message}`); }
+
+    try {
+      await execFileP('git', ['fetch', '--tags', '--force', remote], { cwd, timeoutMs: 180000 });
+    } catch (e) { return fail(`git fetch 失败: ${e.message}`); }
+
+    const current = localRepoVersion(cwd, fsMod);
+    if (!current) return fail('无法读取本地 package.json 版本');
+
+    try {
+      const out = await execFileP('git', ['tag', '--list'], { cwd, timeoutMs: 15000 });
+      const tags = out.trim().split('\n').filter(Boolean);
+      let bestTag = null;
+      for (const tag of tags) {
+        const v = stripVersionPrefix(tag);
+        if (!/^\d+\.\d+\.\d+/.test(v)) continue;
+        if (!bestTag || compareSemver(v, stripVersionPrefix(bestTag)) > 0) bestTag = tag;
+      }
+      if (bestTag) {
+        const cmp = compareSemver(current, stripVersionPrefix(bestTag));
+        if (cmp === null) return fail(`版本无法比较: ${current} vs ${bestTag}`);
+        self.latestVersion = bestTag;
+        self.hasGitUpdate = cmp < 0;
+        self.behind = self.hasGitUpdate ? 1 : 0;
+        return self;
+      }
+      // 仓库无 tag：回退默认分支比较（origin/HEAD 解析实际默认分支名）
+      let upstream = null;
       try {
-        const revParse = await execFileP('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], { cwd, timeoutMs: 15000 });
-        upstream = revParse.trim() || upstream;
-      } catch { /* 无上游分支时用默认 */ }
-      await execFileP('git', ['fetch', upstream.split('/')[0]], { cwd, timeoutMs: 60000 }).catch(() => {});
+        upstream = (await execFileP('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${remote}/HEAD`], { cwd, timeoutMs: 15000 })).trim() || null;
+      } catch { /* 无 origin/HEAD 时继续 */ }
+      if (!upstream) { self.latestVersion = current; return self; }
       const head = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 15000 })).trim();
-      let behind = 0;
-      try {
-        const out = await execFileP('git', ['rev-list', '--count', `HEAD..${upstream}`], { cwd, timeoutMs: 15000 });
-        behind = parseInt(out.trim() || '0', 10);
-      } catch { /* 上游不可达按 0 处理 */ }
-      self.latestVersion = `${upstream}@${head.slice(0, 7)}`;
-      self.behind = Number.isFinite(behind) ? behind : 0;
+      const countOut = await execFileP('git', ['rev-list', '--count', `HEAD..${upstream}`], { cwd, timeoutMs: 15000 });
+      self.behind = parseInt(countOut.trim() || '0', 10) || 0;
       self.hasGitUpdate = self.behind > 0;
+      self.latestVersion = `${upstream}@${head.slice(0, 7)}`;
       return self;
     } catch (e) {
-      logger.log?.(`Git 上游检查失败（${kindSafe(cwd)}）: ${e.message}`);
-      return self;
+      return fail(`tag 比较失败: ${e.message}`);
+    }
+  }
+
+  /** 取本地已 fetch 的 tag 中 semver 最高的发布 tag（无 tag 返回 null）。 */
+  async function latestTagFor(cwd) {
+    try {
+      const out = await execFileP('git', ['tag', '--list'], { cwd, timeoutMs: 15000 });
+      const tags = out.trim().split('\n').filter(Boolean);
+      let bestTag = null;
+      for (const tag of tags) {
+        const v = stripVersionPrefix(tag);
+        if (!/^\d+\.\d+\.\d+/.test(v)) continue;
+        if (!bestTag || compareSemver(v, stripVersionPrefix(bestTag)) > 0) bestTag = tag;
+      }
+      return bestTag;
+    } catch (e) {
+      logger.log?.(`读取 tag 列表失败（${kindSafe(cwd)}）: ${e.message}`);
+      return null;
     }
   }
 
@@ -171,10 +216,10 @@ function createDshUpdate(deps) {
     let hasUpdate = false;
     if (cur.kind === 'local-repo' && typeof latest.behind === 'number') {
       hasUpdate = latest.behind > 0;
-      return { ...cur, latestVersion: latest.latestVersion, behind: latest.behind, hasUpdate };
+      return { ...cur, latestVersion: latest.latestVersion, behind: latest.behind, hasUpdate, error: latest.error || null };
     }
     if (cur.currentVersion !== null && latest.latestVersion !== null) {
-      hasUpdate = compareSimple(cur.currentVersion, latest.latestVersion) < 0;
+      hasUpdate = compareSemver(cur.currentVersion, latest.latestVersion) < 0;
     } else if (cur.currentVersion === null && latest.latestVersion !== null) {
       hasUpdate = true; // 当前版本未知但存在新版 → 提示人工确认
     }
@@ -218,15 +263,40 @@ function createDshUpdate(deps) {
           if (e.message.includes('未提交改动')) throw e;
           throw new Error(`git 校验失败：${e.message}`);
         }
-        log.push('工作区干净，执行 git pull --ff-only + corepack pnpm install');
         try {
-          await execFileP('git', ['pull', '--ff-only'], { cwd, timeoutMs: 180000 });
-          await execFileP('corepack', ['pnpm', 'install'], { cwd, timeoutMs: 300000 });
-          log.push('完成: 本地仓库已更新');
+          await execFileP('git', ['fetch', '--tags', '--force', 'origin'], { cwd, timeoutMs: 180000 });
         } catch (e) {
-          log.push(`失败: ${e.message}`);
-          throw new Error(`本地仓库更新失败：${e.message}`);
+          log.push(`失败: git fetch 失败: ${e.message}`);
+          throw new Error(`本地仓库更新失败：git fetch 失败: ${e.message}`);
         }
+        // 优先 checkout 最新发布 tag（官方发布渠道；兼容 detached HEAD）
+        const targetTag = await latestTagFor(cwd);
+        if (targetTag) {
+          log.push(`执行: git checkout ${targetTag}`);
+          try {
+            await execFileP('git', ['checkout', targetTag], { cwd, timeoutMs: 120000 });
+          } catch (e) {
+            log.push(`失败: git checkout ${targetTag}: ${e.message}`);
+            throw new Error(`本地仓库更新失败：checkout ${targetTag}: ${e.message}`);
+          }
+        } else {
+          log.push('仓库无发布 tag，回退 git pull --ff-only');
+          try {
+            await execFileP('git', ['pull', '--ff-only'], { cwd, timeoutMs: 180000 });
+          } catch (e) {
+            log.push(`失败: git pull: ${e.message}`);
+            throw new Error(`本地仓库更新失败：git pull: ${e.message}`);
+          }
+        }
+        try {
+          await execFileP('corepack', ['pnpm', 'install'], { cwd, timeoutMs: 600000 });
+          await execFileP('corepack', ['pnpm', 'run', 'build'], { cwd, timeoutMs: 600000 });
+        } catch (e) {
+          log.push(`失败: 依赖安装/构建: ${e.message}`);
+          throw new Error(`本地仓库更新失败：依赖安装/构建失败: ${e.message}`);
+        }
+        const newVersion = localRepoVersion(cwd, fsMod);
+        log.push(`完成: 本地仓库已更新${newVersion ? `到 ${newVersion}` : ''}`);
         break;
       }
       case 'npx': {
@@ -249,17 +319,10 @@ function parseVersion(out) {
   return m ? m[1] : null;
 }
 
-/** 极简版本比较（与 lib/semver 对齐；仅数值比较三段） */
+/** 极简版本比较（已由 lib/semver 的完整 semver 比较替代，保留导出兼容旧测试）。 */
 function compareSimple(a, b) {
-  const pa = String(a).match(/(\d+)\.(\d+)\.(\d+)/);
-  const pb = String(b).match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!pa || !pb) return 0;
-  for (let i = 1; i <= 3; i++) {
-    const na = Number(pa[i]);
-    const nb = Number(pb[i]);
-    if (na !== nb) return na < nb ? -1 : 1;
-  }
-  return 0;
+  const r = compareSemver(a, b);
+  return r === null ? 0 : r;
 }
 
 function kindSafe(cwd) {

@@ -169,6 +169,38 @@ function renderSettings(data) {
   const status = el('div', null, 'status'); status.id = 'dshStatus'; status.innerHTML = data.dshStatusHtml;
   dsh.append(settingRow('DSH 安装状态', status));
 
+  // 插件管理：显示当前 profile 已装 bundle，一键禁用所有第三方插件（后端后台重启）
+  const plugins = section('插件管理');
+  const allBundles = Array.isArray(data.pluginBundles) ? data.pluginBundles : [];
+  const builtin = new Set(Array.isArray(data.builtinBundles) ? data.builtinBundles : []);
+  const thirdParty = allBundles.filter((b) => !builtin.has(b));
+  const pluginStatus = el('div', null, 'status');
+  pluginStatus.textContent = allBundles.length === 0
+    ? '未读取到插件清单（后端可能尚未安装）。'
+    : `已装插件 ${allBundles.length} 个，其中第三方 ${thirdParty.length} 个：${thirdParty.join(', ') || '无'}`;
+  const pluginActions = el('div', null, 'actions');
+  const disableAllBtn = el('button', '一键禁用所有第三方插件', 'button'); disableAllBtn.type = 'button';
+  disableAllBtn.onclick = async () => {
+    const confirmed = await api.confirm('将禁用所有第三方插件并自动重启后端（内置插件不受影响）。确定继续吗？');
+    if (!confirmed) return;
+    disableAllBtn.disabled = true;
+    pluginStatus.textContent = '正在禁用…';
+    try {
+      const result = await api.disableAllPlugins();
+      if (result.ok) {
+        pluginStatus.textContent = `已禁用 ${(result.removed || []).join(', ')}，后端重启中。`;
+      } else {
+        pluginStatus.textContent = result.message || '操作失败。';
+        disableAllBtn.disabled = false;
+      }
+    } catch (error) {
+      pluginStatus.textContent = `操作失败：${error.message}`;
+      disableAllBtn.disabled = false;
+    }
+  };
+  pluginActions.append(disableAllBtn);
+  plugins.append(settingRow('当前插件', pluginStatus), pluginActions);
+
   // 刷新/应用按钮固定在标题栏右侧，不随内容滚动
   const actions = el('div', null, 'actions');
   const refresh = el('button', lang.refreshStatus, 'button'); refresh.type = 'button'; refresh.onclick = () => api.refreshDshStatus();
@@ -180,7 +212,7 @@ function renderSettings(data) {
   };
   actions.append(refresh, save, saved);
   headerInner.append(actions);
-  appRoot.append(header, el('div', null, 'settings-header-spacer'), general, appearance, language, dsh);
+  appRoot.append(header, el('div', null, 'settings-header-spacer'), general, appearance, language, dsh, plugins);
   api.onDshStatusUpdated((html) => { status.innerHTML = html; });
 }
 
@@ -303,7 +335,11 @@ function renderAbout(data) {
       const result = await api.checkDshUpdate();
       const current = result.currentVersion || '未知';
       const latest = result.latestVersion || '未知';
-      versionStatus.textContent = `来源：${result.source || '未知'}　当前：${current}　最新：${latest}${result.hasUpdate ? '　发现可用更新' : '　已是最新或无法比较'}`;
+      let tail;
+      if (result.error) tail = `　检查出错：${result.error}`;
+      else if (result.hasUpdate) tail = '　发现可用更新';
+      else tail = '　已是最新';
+      versionStatus.textContent = `来源：${result.source || '未知'}　当前：${current}　最新：${latest}${tail}`;
       updateButton.disabled = !result.hasUpdate;
       checkButton.disabled = false;
     } catch (error) {

@@ -161,6 +161,136 @@ test('createDshUpdate.checkUpdate: local-repo 按 Git 上游落后提交判断',
   assert.equal(r.hasUpdate, true);
 });
 
+test('createDshUpdate.checkUpdate: local-repo 按最新发布 tag 判断', async () => {
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.5-rc.2' }) },
+    execFileP: async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'remote') return 'origin\n';
+      if (cmd === 'git' && args[0] === 'fetch') return '';
+      if (cmd === 'git' && args[0] === 'tag') return 'dsh-v0.1.5-rc.1\ndsh-v0.1.5-rc.2\ndsh-v0.1.6-alpha.1\n';
+      return '';
+    },
+    now: () => 100000,
+    throttleMs: 60 * 1000,
+    logger: {}
+  });
+  const r = await updater.checkUpdate(false);
+  assert.equal(r.kind, 'local-repo');
+  assert.equal(r.latestVersion, 'dsh-v0.1.6-alpha.1');
+  assert.equal(r.hasUpdate, true);
+  assert.equal(r.error, null);
+});
+
+test('createDshUpdate.checkUpdate: 当前已等于最新 tag → 无更新', async () => {
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.6-alpha.1' }) },
+    execFileP: async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'remote') return 'origin\n';
+      if (cmd === 'git' && args[0] === 'fetch') return '';
+      if (cmd === 'git' && args[0] === 'tag') return 'dsh-v0.1.5-rc.2\ndsh-v0.1.6-alpha.1\n';
+      return '';
+    },
+    now: () => 100000,
+    throttleMs: 60 * 1000,
+    logger: {}
+  });
+  const r = await updater.checkUpdate(false);
+  assert.equal(r.hasUpdate, false);
+  assert.equal(r.latestVersion, 'dsh-v0.1.6-alpha.1');
+});
+
+test('createDshUpdate.checkUpdate: git fetch 失败 → error 透出而非静默', async () => {
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.5-rc.2' }) },
+    execFileP: async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'remote') return 'origin\n';
+      if (cmd === 'git' && args[0] === 'fetch') throw new Error('network unreachable');
+      return '';
+    },
+    now: () => 100000,
+    throttleMs: 60 * 1000,
+    logger: {}
+  });
+  const r = await updater.checkUpdate(false);
+  assert.equal(r.hasUpdate, false);
+  assert.match(r.error, /git fetch 失败/);
+});
+
+test('createDshUpdate.checkUpdate: 无 tag 回退上游分支比较', async () => {
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.0' }) },
+    execFileP: async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'remote') return 'origin\n';
+      if (cmd === 'git' && args[0] === 'fetch') return '';
+      if (cmd === 'git' && args[0] === 'tag') return '\n';
+      if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'origin/master\n';
+      if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc123\n';
+      if (cmd === 'git' && args[0] === 'rev-list') return '3\n';
+      return '';
+    },
+    now: () => 100000,
+    throttleMs: 60 * 1000,
+    logger: {}
+  });
+  const r = await updater.checkUpdate(false);
+  assert.equal(r.behind, 3);
+  assert.equal(r.hasUpdate, true);
+});
+
+test('createDshUpdate.update: local-repo checkout 最新 tag + install + build', async () => {
+  const calls = [];
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.6-alpha.2' }) },
+    execFileP: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git' && args[0] === 'status') return '';
+      if (cmd === 'git' && args[0] === 'tag') return 'dsh-v0.1.6-alpha.1\ndsh-v0.1.6-alpha.2\n';
+      return '';
+    },
+    logger: {}
+  });
+  const r = await updater.update(true);
+  assert.equal(r.ok, true);
+  assert.equal(r.restartRequired, true);
+  const flat = calls.map((c) => c.join(' '));
+  assert.ok(flat.includes('git fetch --tags --force origin'), flat.join('\n'));
+  assert.ok(flat.includes('git checkout dsh-v0.1.6-alpha.2'));
+  assert.ok(flat.includes('corepack pnpm install'));
+  assert.ok(flat.includes('corepack pnpm run build'));
+  assert.ok(r.log.join('\n').includes('0.1.6-alpha.2'));
+});
+
+test('createDshUpdate.update: 无 tag 回退 git pull --ff-only', async () => {
+  const calls = [];
+  const updater = createDshUpdate({
+    getLaunch: () => ({ source: 'local-repo', cmd: 'pnpm', args: [], cwd: 'C:/repo' }),
+    getDshConfig: () => ({}),
+    fs: { readFileSync: () => JSON.stringify({ version: '0.1.0' }) },
+    execFileP: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git' && args[0] === 'status') return '';
+      if (cmd === 'git' && args[0] === 'tag') return '\n';
+      return '';
+    },
+    logger: {}
+  });
+  const r = await updater.update(true);
+  assert.equal(r.ok, true);
+  const flat = calls.map((c) => c.join(' '));
+  assert.ok(flat.includes('git pull --ff-only'));
+  assert.ok(flat.includes('corepack pnpm run build'));
+});
+
 test('createDshUpdate.update: 缺 confirm 抛错', async () => {
   const updater = createDshUpdate({
     getLaunch: () => ({ source: 'npx', cmd: 'npx', args: [], cwd: null }),
@@ -197,10 +327,10 @@ test('createDshUpdate.update: 本地仓库脏工作区中止', async () => {
   await assert.rejects(() => updater.update(true), /未提交改动/);
 });
 
-test('compareSimple 比较', () => {
+test('compareSimple 比较（兼容旧导出；预发布参与排序）', () => {
   assert.equal(compareSimple('0.1.0', '0.1.1'), -1);
   assert.equal(compareSimple('1.0.0', '0.9.9'), 1);
-  assert.equal(compareSimple('0.1.1-rc.2', '0.1.1'), 0);
+  assert.equal(compareSimple('0.1.1-rc.2', '0.1.1'), -1);
 });
 
 // ============ diagnostics（P3.3） ============

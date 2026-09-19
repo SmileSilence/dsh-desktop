@@ -121,12 +121,11 @@
 
   function disablePlugins(names, btn) {
     if (!btn) return;
-    const original = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '正在禁用并重启…';
+    btn.textContent = '正在禁用…';
     window.dshDesktop.disablePluginsAndRestart(names).then((result) => {
       if (result.ok) {
-        btn.textContent = `已禁用 ${(result.removed || []).join(', ')}，正在重启`;
+        btn.textContent = `已禁用 ${(result.removed || []).join(', ')}，后端重启中`;
       } else {
         btn.textContent = `操作失败：${result.message || '未知错误'}`;
         btn.disabled = false;

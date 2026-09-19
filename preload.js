@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   refreshDshStatus: () => ipcRenderer.send('refresh-dsh-status'),
   onDshStatusUpdated: (cb) => { ipcRenderer.on('dsh-status-updated', (e, status) => cb(status)); },
   getInternalPageData: () => ipcRenderer.invoke('internal-page-data'),
+  disableAllPlugins: () => ipcRenderer.invoke('internal-disable-all-plugins'),
   checkAppUpdate: () => ipcRenderer.invoke('internal-app-check-update'),
   installAppUpdate: () => ipcRenderer.invoke('app-install-update'),
   checkDshUpdate: () => ipcRenderer.invoke('internal-dsh-check-update'),
